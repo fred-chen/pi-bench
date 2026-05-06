@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>pi-bench | Local AMD Benchmarks</title>
+    <!-- Vue 3 CDN -->
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <!-- Cyber/Monospace styling -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=Inter:wght@400;600&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="index.css">
+</head>
+
+<body>
+    <div id="app" v-cloak>
+        <header class="cyber-header">
+            <div class="logo">
+                <span class="logo-accent">//</span> pi-bench results
+            </div>
+            <nav class="links">
+                <a href="https://github.com/kyuz0/pi-bench" target="_blank" class="cyber-btn">GitHub Repo</a>
+            </nav>
+        </header>
+
+        <main class="cyber-container">
+            <div class="top-section">
+                <section class="intro-box">
+                    <h1>The Project</h1>
+                    <p>
+                        This project benchmarks the <a href="https://pi.dev" target="_blank"
+                            class="strong-link">pi-coding-agent</a> on local AMD hardware (specifically Strix Halo and
+                        Radeon 9700 GPUs).
+                        The objective is to measure what is possible on local hardware with
+                        current models and specific quantizations, helping developers make informed decisions.
+                    </p>
+                    <p>
+                        Models are evaluated using the <a href="https://github.com/mariushobbhahn/SWEBench-verified-mini"
+                            target="_blank">SWEBench-verified-mini</a> dataset. This dataset is a curated subset of SWEBench-verified that uses 50 instead of 500 datapoints while maintaining the same distribution of performance, test pass rates, and difficulty as the original dataset.
+                    </p>
+                    
+                    <div class="sub-section">
+                        <h3>Evaluation Trade-off</h3>
+                        <p>To prioritize speed, heavy containerized test suites are bypassed. Instead, a frontier LLM (<span class="logo-accent">Gemini 3.1 Pro</span>) rigorously judges the generated diffs against the ground-truth solutions.</p>
+                    </div>
+
+                    <div class="sub-section">
+                        <h3>Agent Configuration</h3>
+                        <p>The benchmark executes the bare default <code>pi-coding-agent</code>. No custom system prompts, tools, or wrappers are injected—ensuring a pure test of the model's native capabilities.</p>
+                    </div>
+                </section>
+
+                <div class="about-card">
+                    <h3>// WHOAMI</h3>
+                    <p class="about-name">
+                        <strong>Donato Capitella</strong>
+                    </p>
+                    <p class="about-desc">
+                        Software Engineer and Ethical Hacker. I enjoy understanding systems by breaking them down and
+                        documenting the process. This is a hobby project I maintain alongside <a
+                            href="https://strix-halo-toolboxes.com/" target="_blank">strix-halo-toolboxes.com</a> to
+                        track the coding abilities of local LLMs. Running these benchmarks can take over 24 hours per
+                        model!
+                    </p>
+                    <div class="about-links">
+                        <a href="https://www.youtube.com/@donatocapitella" target="_blank" class="btn-link">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
+                                fill="currentColor">
+                                <path
+                                    d="M19.615 3.184c-3.604-.246-11.631-.245-15.23 0-3.897.266-4.356 2.62-4.385 8.816.029 6.185.484 8.549 4.385 8.816 3.6.245 11.626.246 15.23 0 3.897-.266 4.356-2.62 4.385-8.816-.029-6.185-.484-8.549-4.385-8.816zm-10.615 12.816v-8l8 3.993-8 4.007z">
+                                </path>
+                            </svg>
+                            YouTube Channel
+                        </a>
+                        <a href="https://www.linkedin.com/in/dcapitella" target="_blank" class="btn-link">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
+                                fill="currentColor">
+                                <path
+                                    d="M4.98 3.5c0 1.381-1.11 2.5-2.48 2.5s-2.48-1.119-2.48-2.5c0-1.38 1.11-2.5 2.48-2.5s2.48 1.12 2.48 2.5zm.02 4.5h-5v16h5v-16zm7.982 0h-4.968v16h4.969v-8.399c0-4.67 6.029-5.052 6.029 0v8.399h4.988v-10.131c0-7.88-8.922-7.593-11.018-3.714v-2.155z">
+                                </path>
+                            </svg>
+                            LinkedIn Profile
+                        </a>
+                        <div class="coffee-box">
+                            <p>Support the maintenance of this project:</p>
+                            <a href="https://buymeacoffee.com/dcapitella" target="_blank" class="btn-link coffee-link">
+                                ☕ Buy me a coffee
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div v-if="loading" class="loading">
+                <div class="spinner"></div>
+                Initializing data matrices...
+            </div>
+
+            <div v-else-if="error" class="error-box">
+                CRITICAL ERROR: {{ error }}
+            </div>
+
+            <template v-else>
+                <!-- Platform Selector -->
+                <section class="platform-section" v-if="data.platforms && data.platforms.length > 0">
+                    <div class="platform-tabs">
+                        <button v-for="platform in data.platforms" :key="platform.id" class="cyber-btn tab-btn"
+                            :class="{ active: activePlatformId === platform.id }"
+                            @click="activePlatformId = platform.id">
+                            {{ platform.name }}
+                        </button>
+                    </div>
+
+                    <div class="platform-specs" v-if="activePlatform">
+                        <div class="spec-item"><span class="label">GPU:</span> {{ activePlatform.gpu }}</div>
+                        <div class="spec-item"><span class="label">RAM:</span> {{ activePlatform.ram }}</div>
+                        <div class="spec-item"><span class="label">BACKEND:</span> {{ activePlatform.backend }}</div>
+                        <div class="spec-item"><span class="label">ROCm:</span> {{ activePlatform.rocm }}</div>
+                    </div>
+                </section>
+
+                <section class="dashboard-grid">
+                    <div class="model-card" v-for="model in filteredModels" :key="model.id">
+                        <div class="model-header">
+                            <div class="model-title-area">
+                                <h3>{{ parseModelName(model.name).base }}</h3>
+                                <span class="quant-tag" v-if="parseModelName(model.name).quant">{{ parseModelName(model.name).quant }}</span>
+                            </div>
+                            <div class="score-badge" :class="getScoreClass(model.successRate)">
+                                {{ (model.successRate * 100).toFixed(1) }}%
+                            </div>
+                        </div>
+                        <div class="model-stats">
+                            <div class="stat">
+                                <span class="label">PASS/TOTAL</span>
+                                <span class="value">{{ model.passedTasks }} / {{ model.totalTasks }}</span>
+                            </div>
+                            <div class="stat">
+                                <span class="label">AVG DURATION</span>
+                                <span class="value">{{ formatDuration(model.avgDurationMs) }}</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div v-if="filteredModels.length === 0" class="empty-block"
+                        style="grid-column: 1 / -1; padding: 2rem;">
+                        No models found for the selected platform.
+                    </div>
+                </section>
+
+                <section class="table-section" v-if="filteredModels.length > 0">
+                    <div class="table-controls">
+                        <div class="search-box">
+                            <span class="prompt">></span>
+                            <input type="text" v-model="searchQuery" placeholder="Filter by task ID..."
+                                class="cyber-input">
+                        </div>
+                    </div>
+
+                    <div class="table-wrapper">
+                        <table class="cyber-table">
+                            <thead>
+                                <tr>
+                                    <th>Task ID</th>
+                                    <th v-for="model in filteredModels" :key="model.id">
+                                        {{ parseModelName(model.name).base }}
+                                        <div class="quant-tag-small" v-if="parseModelName(model.name).quant">{{ parseModelName(model.name).quant }}</div>
+                                    </th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr v-for="task in filteredTasks" :key="task.id">
+                                    <td class="task-id-cell">{{ task.id }}</td>
+                                    <td v-for="model in filteredModels" :key="model.id" class="result-cell">
+                                        <div v-if="task.results[model.id]" class="result-pill"
+                                            :class="task.results[model.id].judgeScore >= 1 ? 'pass' : 'fail'"
+                                            @click="openModal(task.id, model.id, task.results[model.id])">
+                                            {{ task.results[model.id].judgeScore >= 1 ? 'PASS' : 'FAIL' }}
+                                        </div>
+                                        <div v-else class="result-pill none">N/A</div>
+                                    </td>
+                                </tr>
+                                <tr v-if="filteredTasks.length === 0">
+                                    <td :colspan="filteredModels.length + 1" class="empty-cell">No tasks match your
+                                        filter.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+            </template>
+        </main>
+
+        <!-- Modal -->
+        <div class="modal-overlay" v-if="activeModal" @click.self="closeModal">
+            <div class="cyber-modal">
+                <div class="modal-header">
+                    <h2>{{ activeModal.taskId }} <span class="dim">|</span> {{ parseModelName(activeModal.modelId).base }} <span class="quant-tag" v-if="parseModelName(activeModal.modelId).quant">{{ parseModelName(activeModal.modelId).quant }}</span>
+                    </h2>
+                    <button class="close-btn" @click="closeModal">[X]</button>
+                </div>
+                <div class="modal-body">
+                    <div class="modal-stat-bar">
+                        <span class="meta-tag" :class="activeModal.result.judgeScore >= 1 ? 'pass-tag' : 'fail-tag'">
+                            SCORE: {{ activeModal.result.judgeScore }}
+                        </span>
+                        <span class="meta-tag">DURATION: {{ formatDuration(activeModal.result.durationMs) }}</span>
+                    </div>
+
+                    <div class="modal-section">
+                        <h3>// Judge Rationale</h3>
+                        <p class="rationale-text">{{ activeModal.result.judgeRationale || 'No rationale provided.' }}
+                        </p>
+                    </div>
+
+                    <div class="modal-section">
+                        <h3>// Generated Diff</h3>
+                        <pre class="diff-block"
+                            v-if="activeModal.result.diff"><code v-html="highlightDiff(activeModal.result.diff)"></code></pre>
+                        <div class="empty-block" v-else>No diff generated.</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+
+</html>

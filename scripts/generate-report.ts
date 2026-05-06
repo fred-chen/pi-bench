@@ -1,0 +1,176 @@
+import { readdir, readFile, mkdir, writeFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
+import { existsSync } from "node:fs";
+
+interface TaskResult {
+  task: string;
+  durationMs: number;
+  diff: string;
+  testExitCode: number | null;
+  testOutput: string;
+  judgeScore: number;
+  judgeRationale: string;
+}
+
+interface Platform {
+  id: string;
+  name: string;
+  gpu: string;
+  ram: string;
+  backend: string;
+  rocm: string;
+}
+
+interface ModelStats {
+  id: string;
+  platformId: string;
+  name: string;
+  totalTasks: number;
+  passedTasks: number;
+  successRate: number;
+  totalDurationMs: number;
+  avgDurationMs: number;
+}
+
+interface TaskAggregate {
+  id: string;
+  results: Record<string, TaskResult>;
+}
+
+async function safeReadFile(path: string): Promise<string | null> {
+  try {
+    return await readFile(path, "utf-8");
+  } catch {
+    return null;
+  }
+}
+
+async function getDirectories(source: string) {
+  try {
+    const entries = await readdir(source, { withFileTypes: true });
+    return entries.filter((dir) => dir.isDirectory()).map((dir) => dir.name);
+  } catch {
+    return [];
+  }
+}
+
+async function main() {
+  const rootDir = resolve(process.cwd());
+  const docsDir = join(rootDir, "docs");
+  const dataPath = join(docsDir, "data.json");
+
+  const platforms: Record<string, Platform> = {};
+  const models: ModelStats[] = [];
+  const tasksMap: Record<string, TaskAggregate> = {};
+
+  const benchmarkResultsDir = join(rootDir, "benchmark_results");
+  let platformDirs: string[] = [];
+  if (existsSync(benchmarkResultsDir)) {
+    platformDirs = await getDirectories(benchmarkResultsDir);
+  }
+  
+  // Array of { platform, modelDir, modelName }
+  const scanTargets: Array<{ platform: Platform; dir: string; name: string }> = [];
+
+  for (const dirName of platformDirs) {
+    const fullPath = join(benchmarkResultsDir, dirName);
+    const platformJsonPath = join(fullPath, "platform.json");
+
+    if (!existsSync(platformJsonPath)) {
+      console.warn(`Skipping ${dirName}: no platform.json found.`);
+      continue;
+    }
+
+    const content = await safeReadFile(platformJsonPath);
+    if (!content) continue;
+
+    let platformData: Platform;
+    try {
+      platformData = { id: dirName, name: dirName, ...JSON.parse(content) };
+    } catch (e) {
+      console.error(`Error parsing ${platformJsonPath}`, e);
+      continue;
+    }
+
+    platforms[platformData.id] = platformData;
+
+    const subDirs = await getDirectories(fullPath);
+    for (const subDir of subDirs) {
+      if (subDir.endsWith("_results")) {
+        scanTargets.push({
+          platform: platformData,
+          dir: join(fullPath, subDir),
+          name: subDir.replace("_results", "")
+        });
+      }
+    }
+  }
+
+  for (const target of scanTargets) {
+    const modelUniqueId = `${target.platform.id}::${target.name}`;
+    const files = await readdir(target.dir);
+    const jsonFiles = files.filter((f) => f.startsWith("results-") && f.endsWith(".json"));
+
+    let totalTasks = 0;
+    let passedTasks = 0;
+    let totalDurationMs = 0;
+
+    for (const file of jsonFiles) {
+      const filePath = join(target.dir, file);
+      const content = await safeReadFile(filePath);
+      if (!content) continue;
+
+      try {
+        const result: TaskResult = JSON.parse(content);
+        
+        totalTasks++;
+        if (result.judgeScore >= 1) {
+          passedTasks++;
+        }
+        totalDurationMs += result.durationMs || 0;
+
+        const taskId = result.task;
+        if (!tasksMap[taskId]) {
+          tasksMap[taskId] = { id: taskId, results: {} };
+        }
+        tasksMap[taskId].results[modelUniqueId] = result;
+      } catch (err) {
+        console.error(`Error parsing ${filePath}:`, err);
+      }
+    }
+
+    if (totalTasks > 0) {
+      models.push({
+        id: modelUniqueId,
+        platformId: target.platform.id,
+        name: target.name,
+        totalTasks,
+        passedTasks,
+        successRate: passedTasks / totalTasks,
+        totalDurationMs,
+        avgDurationMs: Math.round(totalDurationMs / totalTasks)
+      });
+    }
+  }
+
+  models.sort((a, b) => b.successRate - a.successRate);
+
+  const finalData = {
+    metadata: {
+      generatedAt: new Date().toISOString(),
+      judgeModel: "gemini-3.1-pro-preview"
+    },
+    platforms: Object.values(platforms),
+    models,
+    tasks: Object.values(tasksMap)
+  };
+
+  if (!existsSync(docsDir)) {
+    await mkdir(docsDir, { recursive: true });
+  }
+
+  await writeFile(dataPath, JSON.stringify(finalData, null, 2), "utf-8");
+  console.log(`Report generated: ${models.length} models, ${Object.values(platforms).length} platforms, ${Object.keys(tasksMap).length} tasks.`);
+}
+
+main().catch(console.error);
