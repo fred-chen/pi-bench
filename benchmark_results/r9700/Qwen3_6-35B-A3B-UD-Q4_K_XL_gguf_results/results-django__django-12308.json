@@ -1,0 +1,9 @@
+{
+  "task": "django__django-12308",
+  "durationMs": 120241,
+  "diff": "diff --git a/django/contrib/admin/utils.py b/django/contrib/admin/utils.py\nindex e4ddc8f..14d5fde 100644\n--- a/django/contrib/admin/utils.py\n+++ b/django/contrib/admin/utils.py\n@@ -398,6 +398,8 @@ def display_for_field(value, field, empty_value_display):\n         return formats.number_format(value)\n     elif isinstance(field, models.FileField) and value:\n         return format_html('<a href=\"{}\">{}</a>', value.url, value)\n+    elif isinstance(field, models.JSONField):\n+        return field.prepare_value(value)\n     else:\n         return display_for_value(value, empty_value_display)\n \ndiff --git a/django/db/models/fields/json.py b/django/db/models/fields/json.py\nindex edc5441..d5e63bf 100644\n--- a/django/db/models/fields/json.py\n+++ b/django/db/models/fields/json.py\n@@ -113,6 +113,13 @@ class JSONField(CheckFieldDefaultMixin, Field):\n     def value_to_string(self, obj):\n         return self.value_from_object(obj)\n \n+    def prepare_value(self, value):\n+        from django.forms.fields import InvalidJSONInput\n+\n+        if isinstance(value, InvalidJSONInput):\n+            return value\n+        return json.dumps(value, cls=self.encoder)\n+\n     def formfield(self, **kwargs):\n         return super().formfield(**{\n             'form_class': forms.JSONField,\n",
+  "testExitCode": null,
+  "testOutput": "",
+  "judgeScore": 0,
+  "judgeRationale": "The agent added a form field method (`prepare_value`) to a model field, which is incorrect. It also fails to respect `empty_value_display` for empty values since it unconditionally calls `prepare_value` even if the value is empty, returning 'null' instead of the empty display value."
+}

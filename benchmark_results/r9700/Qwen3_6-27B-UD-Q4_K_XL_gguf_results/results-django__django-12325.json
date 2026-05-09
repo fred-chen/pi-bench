@@ -1,0 +1,9 @@
+{
+  "task": "django__django-12325",
+  "durationMs": 337059,
+  "diff": "diff --git a/django/db/models/base.py b/django/db/models/base.py\nindex 8ea6c05..4148a4d 100644\n--- a/django/db/models/base.py\n+++ b/django/db/models/base.py\n@@ -204,7 +204,11 @@ class ModelBase(type):\n             for field in base._meta.local_fields:\n                 if isinstance(field, OneToOneField):\n                     related = resolve_relation(new_class, field.remote_field.model)\n-                    parent_links[make_model_tuple(related)] = field\n+                    key = make_model_tuple(related)\n+                    # If a field with parent_link=True already exists for this\n+                    # related model, don't overwrite it with a non-parent_link field.\n+                    if key not in parent_links or field.remote_field.parent_link:\n+                        parent_links[key] = field\n \n         # Track fields inherited from base models.\n         inherited_attributes = set()\n",
+  "testExitCode": null,
+  "testOutput": "",
+  "judgeScore": 0.5,
+  "judgeRationale": "The agent identifies the ordering issue in `parent_links` dictionary population and correctly prioritizes `OneToOneField`s that explicitly have `parent_link=True`. However, it misses the corresponding change in `django/db/models/options.py` to remove the outdated `ImproperlyConfigured` exception, which was part of the expected complete solution."
+}

@@ -1,0 +1,9 @@
+{
+  "task": "sphinx-doc__sphinx-8551",
+  "durationMs": 829974,
+  "diff": "diff --git a/sphinx/domains/python.py b/sphinx/domains/python.py\nindex 79d7e4f..8e76006 100644\n--- a/sphinx/domains/python.py\n+++ b/sphinx/domains/python.py\n@@ -269,9 +269,17 @@ class PyXrefMixin:\n     def make_xref(self, rolename: str, domain: str, target: str,\n                   innernode: \"Type[TextlikeNode]\" = nodes.emphasis,\n                   contnode: Node = None, env: BuildEnvironment = None) -> Node:\n-        result = super().make_xref(rolename, domain, target,  # type: ignore\n-                                   innernode, contnode, env)\n+        if not rolename:\n+            return contnode or innernode(target, target)\n+        # Include module and class context for correct resolution\n+        kwargs = {}\n+        if env:\n+            kwargs['py:module'] = env.ref_context.get('py:module')\n+            kwargs['py:class'] = env.ref_context.get('py:class')\n+        result = pending_xref('', refdomain=domain, refexplicit=False,\n+                              reftype=rolename, reftarget=target, **kwargs)\n         result['refspecific'] = True\n+        result += contnode or innernode(target, target)\n         if target.startswith(('.', '~')):\n             prefix, result['reftarget'] = target[0], target[1:]\n             if prefix == '.':\n",
+  "testExitCode": null,
+  "testOutput": "",
+  "judgeScore": 0,
+  "judgeRationale": "The agent modifies `make_xref` to use `env.ref_context`, but fails to pass `env` from `docfields.py` when processing `:type:` and `:rtype:` fields, meaning `env` will be None and the bug will not be fixed."
+}

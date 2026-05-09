@@ -1,0 +1,9 @@
+{
+  "task": "django__django-12325",
+  "durationMs": 220060,
+  "diff": "diff --git a/django/db/models/base.py b/django/db/models/base.py\nindex 8ea6c05..b3036dd 100644\n--- a/django/db/models/base.py\n+++ b/django/db/models/base.py\n@@ -204,7 +204,11 @@ class ModelBase(type):\n             for field in base._meta.local_fields:\n                 if isinstance(field, OneToOneField):\n                     related = resolve_relation(new_class, field.remote_field.model)\n-                    parent_links[make_model_tuple(related)] = field\n+                    target_key = make_model_tuple(related)\n+                    if (target_key in parent_links and\n+                            parent_links[target_key].remote_field.parent_link):\n+                        continue\n+                    parent_links[target_key] = field\n \n         # Track fields inherited from base models.\n         inherited_attributes = set()\ndiff --git a/repro_app/__init__.py b/repro_app/__init__.py\nnew file mode 100644\nindex 0000000..e69de29\ndiff --git a/repro_app/apps.py b/repro_app/apps.py\nnew file mode 100644\nindex 0000000..e69de29\n",
+  "testExitCode": null,
+  "testOutput": "",
+  "judgeScore": 0,
+  "judgeRationale": "The agent only modifies how `parent_links` are gathered from base classes, but the issue occurs due to multiple `OneToOneField`s defined on the model itself, causing `ImproperlyConfigured` to be raised from `django/db/models/options.py` (which the agent does not modify). Thus, the agent fails to resolve the issue."
+}

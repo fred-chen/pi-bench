@@ -65,6 +65,7 @@ const App = {
         const parseModelName = (idOrName) => {
             let name = idOrName.includes('::') ? idOrName.split('::')[1] : idOrName;
             let clean = name.replace(/_gguf$/i, '');
+            clean = clean.replace(/-\d{5}-of-\d{5}$/i, '');
             const match = clean.match(/(.*?)-(UD-Q[A-Z0-9_]+|Q[A-Z0-9_]+)$/i);
             
             let base = match ? match[1] : clean;

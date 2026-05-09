@@ -115,7 +115,7 @@ When running a **batch** (providing a directory like `tasks/verified-mini/`), `p
      "id": "r9700",
      "name": "Radeon 9700",
      "gpu": "Radeon 9700 16GB",
-     "ram": "64GB DDR5",
+     "ram": "32GB DDR5",
      "backend": "llama.cpp",
      "rocm": "7.2.2"
    }
@@ -129,11 +129,13 @@ When running a **batch** (providing a directory like `tasks/verified-mini/`), `p
    *This automatically routes the results folder (e.g. `Qwen3_6..._results`) right into `benchmark_results/r9700/`.*
    
 3. **Generate the report**:
+   This script parses all new results in `benchmark_results/` and compiles them into a single `docs/data.json` file. The frontend dashboard (`app.js`) requires this JSON file to display data.
    ```bash
    bun run scripts/generate-report.ts
    ```
 
-Finally, serve the `docs/` folder to view your updated multi-platform dashboard!
-```bash
-python3 -m http.server 8082 -d docs/
-```
+4. **Serve the dashboard**:
+   The dashboard is a static website. Serve the `docs/` folder, open your browser (e.g., `http://localhost:8082`), and the Vue frontend (`app.js`) will automatically load the updated `data.json`.
+   ```bash
+   python3 -m http.server 8082 -d docs/
+   ```
