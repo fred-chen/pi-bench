@@ -1,0 +1,9 @@
+{
+  "task": "sphinx-doc__sphinx-7757",
+  "durationMs": 301827,
+  "diff": "diff --git a/sphinx/util/inspect.py b/sphinx/util/inspect.py\nindex 15f0d66..a1e5100 100644\n--- a/sphinx/util/inspect.py\n+++ b/sphinx/util/inspect.py\n@@ -521,10 +521,17 @@ def signature_from_str(signature: str) -> inspect.Signature:\n     params = []\n \n     if hasattr(args, \"posonlyargs\"):\n-        for arg in args.posonlyargs:  # type: ignore\n+        # Defaults are shared between posonlyargs and args.args.\n+        # The last len(args.defaults) parameters from the combined list get defaults.\n+        total_positional = len(args.posonlyargs) + len(args.args)  # type: ignore\n+        for i, arg in enumerate(args.posonlyargs):  # type: ignore\n+            if total_positional - i <= len(args.defaults):\n+                default = ast_unparse(args.defaults[i - total_positional + len(args.defaults)])\n+            else:\n+                default = Parameter.empty\n             annotation = ast_unparse(arg.annotation) or Parameter.empty\n             params.append(Parameter(arg.arg, Parameter.POSITIONAL_ONLY,\n-                                    annotation=annotation))\n+                                    default=default, annotation=annotation))\n \n     for i, arg in enumerate(args.args):\n         if len(args.args) - i <= len(args.defaults):\n",
+  "testExitCode": null,
+  "testOutput": "",
+  "judgeScore": 1,
+  "judgeRationale": "The agent correctly assigns default values to positional-only arguments by calculating their offset relative to the total number of positional arguments and the length of the defaults list. It updates the `posonlyargs` loop to include these default values without breaking the existing logic for `args.args`, effectively fixing the issue."
+}
