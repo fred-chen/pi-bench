@@ -83,7 +83,7 @@ To ensure the coding agent can safely run `npm install`, arbitrary tests, or cod
 
 ### Configuring Models
 
-By default, the script resolves models securely using standard environment variables (e.g., `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`) loaded from your `.env` file. Since the container runs with `--network host`, local models served at `localhost:8080` (e.g., `llama.cpp`) are discovered automatically without any configuration.
+By default, the script resolves models securely using standard environment variables (e.g., `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`) loaded from your `.env` file. Since the container runs with `--network host`, local models served at `localhost:8080` (e.g., `llama.cpp`) are discovered automatically without any configuration. You can override the port by passing `--port <port>`.
 
 If you need to configure custom API endpoints (e.g., an OpenAI-compatible server on a non-standard port), you can place a standard `models.json` file inside the `pi-bench/` root directory. The script will automatically detect and load it.
 
