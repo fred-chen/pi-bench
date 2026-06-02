@@ -147,6 +147,7 @@ ${task.prompt}`;
       setTimeout(() => reject(new Error("AGENT_TIMEOUT")), timeoutMs);
     });
 
+    let timedOut = false;
     try {
       await Promise.race([
         session.prompt(agentPrompt),
@@ -156,12 +157,13 @@ ${task.prompt}`;
       if (err.message === "AGENT_TIMEOUT") {
         console.error(`\n[ERROR] Agent execution timed out after ${timeoutMin} minutes. Aborting...`);
         await session.abort();
+        timedOut = true;
       } else {
         throw err;
       }
     }
 
-    const lastAssistant = [...session.messages].reverse().find(m => m.role === "assistant") as any;
+    let lastAssistant = [...session.messages].reverse().find(m => m.role === "assistant") as any;
     if (lastAssistant && lastAssistant.stopReason === "error") {
       const errorMsg = lastAssistant.errorMessage || "Unknown error";
       const isConnectionError = /connection|fetch failed|socket|refused|lost|connect|timeout|timed out|500|502|503|504/i.test(errorMsg);
@@ -170,18 +172,53 @@ ${task.prompt}`;
       }
     }
 
-    const duration = Date.now() - start;
-    console.log(`\n--- Agent finished in ${duration}ms ---\n`);
+    const getDiff = async () => {
+      await execAsync(`git add .`, { cwd: tmpDir });
+      try {
+        const { stdout } = await execAsync(`git diff --cached`, { cwd: tmpDir });
+        return stdout;
+      } catch (e) {
+        return "";
+      }
+    };
 
     console.log(`[INFO] Extracting diff...`);
-    await execAsync(`git add .`, { cwd: tmpDir });
-    let diff = "";
-    try {
-      const { stdout } = await execAsync(`git diff --cached`, { cwd: tmpDir });
-      diff = stdout;
-    } catch (e) {
-      diff = "";
+    let diff = await getDiff();
+
+    if (!diff.trim() && !timedOut && (!lastAssistant || lastAssistant.stopReason !== "error")) {
+      console.log(`\n[INFO] Agent finished with no changes. Prompting to continue...`);
+      const reminderPrompt = `You are running as part of an automated pipeline, as such you MUST complete the task you have been assigned and fully implement it now by editing all the required files in the workspace, autonomously and without any further interaction.\n\nReminder of your task:\n${task.prompt}`;
+
+      try {
+        await Promise.race([
+          session.prompt(reminderPrompt),
+          timeoutPromise
+        ]);
+      } catch (err: any) {
+        if (err.message === "AGENT_TIMEOUT") {
+          console.error(`\n[ERROR] Agent execution timed out during reminder. Aborting...`);
+          await session.abort();
+          timedOut = true;
+        } else {
+          throw err;
+        }
+      }
+
+      lastAssistant = [...session.messages].reverse().find(m => m.role === "assistant") as any;
+      if (lastAssistant && lastAssistant.stopReason === "error") {
+        const errorMsg = lastAssistant.errorMessage || "Unknown error";
+        const isConnectionError = /connection|fetch failed|socket|refused|lost|connect|timeout|timed out|500|502|503|504/i.test(errorMsg);
+        if (isConnectionError) {
+          throw new Error(`Inference backend is unreachable or crashed: ${errorMsg}`);
+        }
+      }
+
+      console.log(`[INFO] Re-extracting diff...`);
+      diff = await getDiff();
     }
+
+    const duration = Date.now() - start;
+    console.log(`\n--- Agent finished in ${duration}ms ---\n`);
 
     console.log(`[INFO] Generated diff length: ${diff.length} characters`);
 
