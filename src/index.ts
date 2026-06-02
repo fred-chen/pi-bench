@@ -15,7 +15,7 @@ import { existsSync } from "node:fs";
 
 const execAsync = promisify(exec);
 
-async function runTask(taskFile: string, agentModelReq: any, judgeModelReq: any, outputDir: string = ".", timeoutMin: number = 30, port: string = "8080") {
+async function runTask(taskFile: string, agentModelReq: any, judgeModelReq: any, outputDir: string = ".", timeoutMin: number = 30, engine: string = "llama.cpp", port?: string) {
   const taskContent = await readFile(taskFile, "utf-8");
   const task = JSON.parse(taskContent);
 
@@ -41,11 +41,11 @@ async function runTask(taskFile: string, agentModelReq: any, judgeModelReq: any,
     let modelRegistry;
     if (existsSync(localModelsPath)) {
       console.log(`[INFO] Using local models.json configuration`);
-      if (port !== "8080") {
+      if (port) {
         const modelsContent = await readFile(localModelsPath, "utf-8");
         const modelsData = JSON.parse(modelsContent);
-        if (modelsData.providers && modelsData.providers["llama.cpp"] && modelsData.providers["llama.cpp"].baseUrl) {
-          modelsData.providers["llama.cpp"].baseUrl = modelsData.providers["llama.cpp"].baseUrl.replace(/:\d+/, `:${port}`);
+        if (modelsData.providers && modelsData.providers[engine] && modelsData.providers[engine].baseUrl) {
+          modelsData.providers[engine].baseUrl = modelsData.providers[engine].baseUrl.replace(/:\d+/, `:${port}`);
         }
         const tmpModelsPath = join(tmpDir, "models.json");
         await writeFile(tmpModelsPath, JSON.stringify(modelsData));
@@ -54,10 +54,10 @@ async function runTask(taskFile: string, agentModelReq: any, judgeModelReq: any,
         modelRegistry = ModelRegistry.create(authStorage, localModelsPath);
       }
     } else {
-      if (port !== "8080") {
+      if (port) {
         const modelsData = {
           providers: {
-            "llama.cpp": {
+            [engine]: {
               baseUrl: `http://localhost:${port}/v1`,
               api: "openai-completions",
               apiKey: "none",
@@ -80,9 +80,9 @@ async function runTask(taskFile: string, agentModelReq: any, judgeModelReq: any,
         throw new Error(`Could not find model ${agentModelReq.provider}/${agentModelReq.id} in registry`);
       }
     } else {
-      const llamaModels = modelRegistry.getAll().filter(m => m.provider === "llama.cpp");
-      if (llamaModels.length > 0) {
-        resolvedAgentModel = llamaModels[0];
+      const engineModels = modelRegistry.getAll().filter(m => m.provider === engine);
+      if (engineModels.length > 0) {
+        resolvedAgentModel = engineModels[0];
         console.log(`[INFO] No agent model specified, defaulting to ${resolvedAgentModel.provider}/${resolvedAgentModel.id}`);
       }
     }
@@ -323,14 +323,15 @@ async function main() {
       "model-tag": { type: "string" },
       timeout: { type: "string", default: "30" },
       platform: { type: "string" },
-      port: { type: "string", default: "8080" },
+      engine: { type: "string", default: "llama.cpp" },
+      port: { type: "string" },
     },
     allowPositionals: true,
   });
 
   const targetPath = positionals[0];
   if (!targetPath) {
-    console.error("Usage: bun run src/index.ts <task-file-or-dir> [--model provider/model-id] [--judge-model provider/model-id] [--model-tag tag] [--platform platform-id] [--port 8080]");
+    console.error("Usage: bun run src/index.ts <task-file-or-dir> [--model provider/model-id] [--judge-model provider/model-id] [--model-tag tag] [--platform platform-id] [--engine llama.cpp|ds4] [--port 8080]");
     process.exit(1);
   }
 
@@ -369,10 +370,12 @@ async function main() {
   const timeoutMin = parseInt(values.timeout as string, 10) || 30;
   
   const modelTag = values["model-tag"] as string | undefined;
+  const engine = values.engine as string;
   let outputDir = "results";
-  if (!agentModelReq || agentModelReq.provider === "llama.cpp") {
+  if (!agentModelReq || agentModelReq.provider === "llama.cpp" || agentModelReq.provider === "ds4") {
     try {
-      const res = await fetch(`http://localhost:${values.port}/v1/models`);
+      const fetchPort = values.port || (engine === "ds4" ? "8000" : "8080");
+      const res = await fetch(`http://localhost:${fetchPort}/v1/models`);
       const data = await res.json();
       if (data && data.data && data.data.length > 0) {
         const quantName = data.data[0].id.replace(/[^a-zA-Z0-9_-]/g, "_");
@@ -429,7 +432,7 @@ async function main() {
       console.warn(`[WARN] Could not pre-parse task file ${f} for resume check.`);
     }
 
-    const res = await runTask(f, agentModelReq, judgeModelReq, outputDir, timeoutMin, values.port as string);
+    const res = await runTask(f, agentModelReq, judgeModelReq, outputDir, timeoutMin, engine, values.port as string);
     results.push(res);
     if (res.judgeScore === 1) passed++;
     totalDuration += res.durationMs;
