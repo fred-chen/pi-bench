@@ -168,34 +168,40 @@ ${task.prompt}`;
     });
 
     let timedOut = false;
-    let currentPrompt = agentPrompt;
-    let maxLoops = 5;
-    
-    while (!timedOut && maxLoops > 0) {
-      try {
-        await Promise.race([
-          session.prompt(currentPrompt),
-          timeoutPromise
-        ]);
-        break; // Finished successfully
-      } catch (err: any) {
-        if (err.message === "AGENT_TIMEOUT") {
-          console.error(`\n[ERROR] Agent execution timed out after ${timeoutMin} minutes. Aborting...`);
-          await session.abort();
-          timedOut = true;
-        } else if (loopDetected) {
-          console.log(`\n[INFO] Recovering from tool loop... Prompting agent to try something else.`);
-          loopDetected = false;
-          repeatedToolCount = 0;
-          lastToolName = "";
-          lastToolArgs = "";
-          currentPrompt = `You are repeatedly calling the exact same tool with the same arguments. This is a loop. Please try a different approach, use different arguments, or if you have enough information, implement the fix.`;
-          maxLoops--;
-        } else {
-          throw err;
+
+    const runPromptWithLoopDetection = async (promptText: string) => {
+      let currentPrompt = promptText;
+      let maxLoops = 5;
+      
+      while (!timedOut && maxLoops > 0) {
+        try {
+          await Promise.race([
+            session.prompt(currentPrompt),
+            timeoutPromise
+          ]);
+          if (loopDetected) throw new Error("LOOP_DETECTED");
+          break; // Finished successfully
+        } catch (err: any) {
+          if (err.message === "AGENT_TIMEOUT") {
+            console.error(`\n[ERROR] Agent execution timed out after ${timeoutMin} minutes. Aborting...`);
+            await session.abort();
+            timedOut = true;
+          } else if (loopDetected || err.message === "LOOP_DETECTED" || err.name === "AbortError" || err.message?.includes("abort")) {
+            console.log(`\n[INFO] Recovering from tool loop... Prompting agent to try something else.`);
+            loopDetected = false;
+            repeatedToolCount = 0;
+            lastToolName = "";
+            lastToolArgs = "";
+            currentPrompt = `You are repeatedly calling the exact same tool with the same arguments. This is a loop. Please try a different approach, use different arguments, or if you have enough information, implement the fix.`;
+            maxLoops--;
+          } else {
+            throw err;
+          }
         }
       }
-    }
+    };
+
+    await runPromptWithLoopDetection(agentPrompt);
 
     let lastAssistant = [...session.messages].reverse().find(m => m.role === "assistant") as any;
     if (lastAssistant && lastAssistant.stopReason === "error") {
@@ -224,15 +230,10 @@ ${task.prompt}`;
       const reminderPrompt = `You are running as part of an automated pipeline, as such you MUST complete the task you have been assigned and fully implement it now by editing all the required files in the workspace, autonomously and without any further interaction.\n\nReminder of your task:\n${task.prompt}`;
 
       try {
-        await Promise.race([
-          session.prompt(reminderPrompt),
-          timeoutPromise
-        ]);
+        await runPromptWithLoopDetection(reminderPrompt);
       } catch (err: any) {
         if (err.message === "AGENT_TIMEOUT") {
-          console.error(`\n[ERROR] Agent execution timed out during reminder. Aborting...`);
-          await session.abort();
-          timedOut = true;
+          // Already handled in runPromptWithLoopDetection, but just in case
         } else {
           throw err;
         }
