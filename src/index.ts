@@ -113,6 +113,13 @@ async function runTask(taskFile: string, agentModelReq: any, judgeModelReq: any,
         console.log(`\n[AGENT] Started using tool: ${event.toolName} with args: ${argsStr}`);
       } else if (event.type === "tool_execution_end") {
         console.log(`[AGENT] Finished tool: ${event.toolName}`);
+        if (event.result) {
+          try {
+            let resStr = typeof event.result === 'string' ? event.result : JSON.stringify(event.result);
+            if (resStr.length > 500) resStr = resStr.substring(0, 500) + "... [TRUNCATED]";
+            console.log(`[AGENT] Tool result: ${resStr}`);
+          } catch (e) {}
+        }
       } else if (event.type === "auto_retry_start") {
         console.warn(`\n[WARN] Agent retrying (${event.attempt}/${event.maxAttempts}): ${event.errorMessage}`);
       }
@@ -288,6 +295,14 @@ ${task.testCommand ? `Automated Test Execution:\nCommand: ${task.testCommand}\nE
     const resultPath = join(outputDir, `results-${task.id}.json`);
     await writeFile(resultPath, JSON.stringify(result, null, 2));
     console.log(`\n[INFO] Task Complete! Result saved to ${resultPath}`);
+
+    const transcriptPath = join(outputDir, `transcript-${task.id}.json`);
+    try {
+      await writeFile(transcriptPath, JSON.stringify([...session.messages], null, 2));
+      console.log(`[INFO] Agent transcript saved to ${transcriptPath}`);
+    } catch (e) {
+      console.warn(`[WARN] Could not save transcript to ${transcriptPath}`, e);
+    }
     console.log(`[INFO] Score: ${result.judgeScore}`);
     console.log(`[INFO] Rationale: ${result.judgeRationale}`);
 
