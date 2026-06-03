@@ -170,7 +170,7 @@ ${task.prompt}`;
 
     const runPromptWithLoopDetection = async (promptText: string) => {
       let currentPrompt = promptText;
-      let maxLoops = 5;
+      let maxLoops = 3;
 
       while (!timedOut && maxLoops > 0) {
         try {
