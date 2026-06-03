@@ -156,10 +156,8 @@ CRITICAL INSTRUCTIONS:
 4. Focus only on fixing the issue described below and verifying your fix with tests.
 5. You are running completely autonomously. There is NO human interaction. You must independently investigate, write the fix, verify it, and then STOP calling tools when you are done.
 6. If you find yourself repeatedly running the exact same commands or reading the same files without making progress, STOP looping. Formulate a new plan or implement a fix based on what you already know.
-7. If you attempt to write a test script and it fails due to environment issues (like missing modules), do NOT get stuck trying to fix the environment. If you know how to fix the source code based on the issue description, apply the patch directly using your editing tools.
-8. Prefer to use the dedicated, built-in tools (like 'read', 'edit', 'write') for reading and modifying files. Only use 'bash' as a fallback if your default tools fail, or when you need to do something that you can't do with the built-in tools.
-9. You are to complete the task and produce changes editing the files in this project. Do not stop without editing the files required to complete the task!
-10. If the 'read' tool output truncates and says "Use offset=X to continue", use that offset in your next read call to paginate correctly. Do not just randomly change the limit.
+7. You are to complete the task and produce changes editing the files in this project. Do not stop without editing the files required to complete the task!
+8. If the 'read' tool output truncates and says "Use offset=X to continue", use that offset in your next read call to paginate correctly. Do not just randomly change the limit.
 
 Issue Description:
 ${task.prompt}`;
