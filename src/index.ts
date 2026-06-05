@@ -314,11 +314,29 @@ ${task.prompt}`;
 
           // Revert any changes the agent made to standard test directories
           // to prevent patch conflicts with the SWE-bench evaluation testPatch.
+          // IMPORTANT: Each directory MUST be reverted in its own command.
+          // Passing multiple paths (e.g. `git checkout -- tests/ test/ testing/`)
+          // causes git to abort the ENTIRE operation if ANY pathspec doesn't match,
+          // silently leaving all test files un-reverted.
           console.log(`[INFO] Reverting agent test modifications to avoid conflicts...`);
-          await execAsync(`git reset HEAD tests/ test/ testing/ 2>/dev/null || true`, { cwd: tmpDir });
-          await execAsync(`git checkout -- tests/ test/ testing/ 2>/dev/null || true`, { cwd: tmpDir });
+          for (const testDir of ['tests/', 'test/', 'testing/']) {
+            try {
+              // Single atomic operation: restores both index and working tree to HEAD
+              await execAsync(`git checkout HEAD -- ${testDir}`, { cwd: tmpDir });
+              console.log(`[INFO] Reverted ${testDir} to HEAD.`);
+            } catch {
+              // Directory doesn't exist in this repo — expected, not an error
+            }
+          }
+          // Clean any untracked files the agent may have added in test directories
+          await execAsync(`git clean -fd tests/ test/ testing/ 2>/dev/null || true`, { cwd: tmpDir });
 
-          await execAsync(`git apply swe_test.patch`, { cwd: tmpDir });
+          try {
+            await execAsync(`git apply swe_test.patch`, { cwd: tmpDir });
+          } catch {
+            console.log(`[INFO] Standard git apply failed, trying 3-way merge...`);
+            await execAsync(`git apply --3way swe_test.patch`, { cwd: tmpDir });
+          }
           console.log(`[INFO] Test patch applied successfully.`);
         } catch (e) {
           console.warn(`[WARN] Failed to apply test patch:`, e);
