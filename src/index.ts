@@ -15,7 +15,37 @@ import { existsSync } from "node:fs";
 
 const execAsync = promisify(exec);
 
-async function runTask(taskFile: string, agentModelReq: any, judgeModelReq: any, outputDir: string = ".", timeoutMin: number = 30, engine: string = "llama.cpp", port?: string) {
+// SWE-bench container test command builder
+function buildSweTestCommand(task: any): string {
+  const python = "/opt/miniconda3/envs/testbed/bin/python";
+
+  if (task.repo === "django/django") {
+    // Extract test modules from FAIL_TO_PASS entries like
+    // "test_foo (auth_tests.test_forms.AuthTest)" → "auth_tests.test_forms"
+    const modules = [...new Set(task.failToPass.map((t: string) => {
+      const match = t.match(/\(([^)]+)\)/);
+      if (match) {
+        const parts = match[1].split(".");
+        return parts.slice(0, -1).join(".");
+      }
+      return t;
+    }))];
+    // Django's runtests.py returns exit 0 even on failures, so we wrap
+    // the command to parse the output and return a proper exit code.
+    return `${python} /testbed/tests/runtests.py ${modules.join(" ")} --verbosity 2 2>&1 | tee /tmp/test_output.txt; grep -q "^OK" /tmp/test_output.txt`;
+  }
+
+  if (task.repo === "sphinx-doc/sphinx") {
+    // Sphinx uses pytest; FAIL_TO_PASS entries are pytest node IDs
+    const testPaths = task.failToPass.map((t: string) => `"${t}"`).join(" ");
+    return `cd /testbed && ${python} -m pytest ${testPaths} -xvs`;
+  }
+
+  // Generic fallback: run pytest
+  return `cd /testbed && ${python} -m pytest --tb=short`;
+}
+
+async function runTask(taskFile: string, agentModelReq: any, judgeModelReq: any, outputDir: string = ".", timeoutMin: number = 30, provider: string = "llama.cpp", port?: string) {
   const taskContent = await readFile(taskFile, "utf-8");
   const task = JSON.parse(taskContent);
 
@@ -23,16 +53,26 @@ async function runTask(taskFile: string, agentModelReq: any, judgeModelReq: any,
   console.log(`[INFO] Starting benchmark for task file: ${taskFile}`);
   console.log(`======================================================\n`);
 
-  const tmpDir = await mkdtemp(join(tmpdir(), "pi-bench-"));
-  console.log(`[INFO] Working directory: ${tmpDir}`);
+  const sweTestbed = "/testbed";
+  const isSweContainer = existsSync(sweTestbed);
+  const tmpDir = isSweContainer ? sweTestbed : await mkdtemp(join(tmpdir(), "pi-bench-"));
+  console.log(`[INFO] Working directory: ${tmpDir} (SWE container: ${isSweContainer})`);
 
   try {
-    console.log(`[INFO] Cloning ${task.repo} at commit ${task.commit}...`);
-    await execAsync(`git init`, { cwd: tmpDir });
-    await execAsync(`git remote add origin https://github.com/${task.repo}.git`, { cwd: tmpDir });
-    await execAsync(`git fetch --depth 1 origin ${task.commit}`, { cwd: tmpDir });
-    await execAsync(`git checkout --detach FETCH_HEAD`, { cwd: tmpDir });
-    await execAsync(`git reset --hard FETCH_HEAD`, { cwd: tmpDir });
+    if (isSweContainer) {
+      console.log(`[INFO] Using pre-configured SWE-bench testbed at ${sweTestbed}`);
+      // Ensure git is initialized in /testbed for diff extraction
+      try { await execAsync(`git status`, { cwd: tmpDir }); } catch {
+        await execAsync(`git init && git add -A && git commit -m "baseline" --allow-empty`, { cwd: tmpDir });
+      }
+    } else {
+      console.log(`[INFO] Cloning ${task.repo} at commit ${task.commit}...`);
+      await execAsync(`git init`, { cwd: tmpDir });
+      await execAsync(`git remote add origin https://github.com/${task.repo}.git`, { cwd: tmpDir });
+      await execAsync(`git fetch --depth 1 origin ${task.commit}`, { cwd: tmpDir });
+      await execAsync(`git checkout --detach FETCH_HEAD`, { cwd: tmpDir });
+      await execAsync(`git reset --hard FETCH_HEAD`, { cwd: tmpDir });
+    }
 
     console.log(`[INFO] Initializing agent session...`);
     const authStorage = AuthStorage.create();
@@ -44,8 +84,8 @@ async function runTask(taskFile: string, agentModelReq: any, judgeModelReq: any,
       if (port) {
         const modelsContent = await readFile(localModelsPath, "utf-8");
         const modelsData = JSON.parse(modelsContent);
-        if (modelsData.providers && modelsData.providers[engine] && modelsData.providers[engine].baseUrl) {
-          modelsData.providers[engine].baseUrl = modelsData.providers[engine].baseUrl.replace(/:\d+/, `:${port}`);
+        if (modelsData.providers && modelsData.providers[provider] && modelsData.providers[provider].baseUrl) {
+          modelsData.providers[provider].baseUrl = modelsData.providers[provider].baseUrl.replace(/:\d+/, `:${port}`);
         }
         const tmpModelsPath = tmpDir + "-models.json";
         await writeFile(tmpModelsPath, JSON.stringify(modelsData));
@@ -57,7 +97,7 @@ async function runTask(taskFile: string, agentModelReq: any, judgeModelReq: any,
       if (port) {
         const modelsData = {
           providers: {
-            [engine]: {
+            [provider]: {
               baseUrl: `http://localhost:${port}/v1`,
               api: "openai-completions",
               apiKey: "none",
@@ -80,9 +120,9 @@ async function runTask(taskFile: string, agentModelReq: any, judgeModelReq: any,
         throw new Error(`Could not find model ${agentModelReq.provider}/${agentModelReq.id} in registry`);
       }
     } else {
-      const engineModels = modelRegistry.getAll().filter(m => m.provider === engine);
-      if (engineModels.length > 0) {
-        resolvedAgentModel = engineModels[0];
+      const providerModels = modelRegistry.getAll().filter(m => m.provider === provider);
+      if (providerModels.length > 0) {
+        resolvedAgentModel = providerModels[0];
         console.log(`[INFO] No agent model specified, defaulting to ${resolvedAgentModel.provider}/${resolvedAgentModel.id}`);
       }
     }
@@ -147,6 +187,9 @@ async function runTask(taskFile: string, agentModelReq: any, judgeModelReq: any,
 
     console.log(`\n--- Agent output ---`);
     const start = Date.now();
+    const sweEnvInstruction = isSweContainer
+      ? `\n9. The development environment is already fully configured with the correct Python version and all dependencies pre-installed. Do NOT install packages, create virtual environments, or modify the Python installation. Just focus on understanding and fixing the bug.\n10. Do NOT modify any test files. All test changes have already been taken care of. Your task is to make minimal changes to non-test source files only.\n11. Make the MINIMAL changes necessary to fix the issue. Do not refactor unrelated code.`
+      : "";
     const agentPrompt = `You are an expert AI coding assistant. The target repository has ALREADY been cloned into your CURRENT WORKING DIRECTORY (\`${tmpDir}\`). 
 
 CRITICAL INSTRUCTIONS:
@@ -157,7 +200,7 @@ CRITICAL INSTRUCTIONS:
 5. You are running completely autonomously. There is NO human interaction. You must independently investigate, write the fix, verify it, and then STOP calling tools when you are done.
 6. If you find yourself repeatedly running the exact same commands or reading the same files without making progress, STOP looping. Formulate a new plan or implement a fix based on what you already know.
 7. You are to complete the task and produce changes editing the files in this project. Do not stop without editing the files required to complete the task!
-8. If the 'read' tool output truncates and says "Use offset=X to continue", use that offset in your next read call to paginate correctly. Do not just randomly change the limit.
+8. If the 'read' tool output truncates and says "Use offset=X to continue", use that offset in your next read call to paginate correctly. Do not just randomly change the limit.${sweEnvInstruction}
 
 Issue Description:
 ${task.prompt}`;
@@ -258,28 +301,63 @@ ${task.prompt}`;
 
     let testOutput = "";
     let testExitCode: number | null = null;
-    if (task.testPatch) {
-      console.log(`[INFO] Applying test patch...`);
-      try {
-        const patchPath = join(tmpDir, "test.patch");
-        await writeFile(patchPath, task.testPatch);
-        await execAsync(`git apply test.patch`, { cwd: tmpDir });
-      } catch (e) {
-        console.warn(`[WARN] Failed to apply test patch:`, e);
-      }
-    }
 
-    if (task.testCommand) {
-      console.log(`[INFO] Running test command: ${task.testCommand}...`);
+    // SWE-bench container test evaluation: apply test patch and run FAIL_TO_PASS tests
+    if (isSweContainer && task.failToPass && task.failToPass.length > 0) {
+      console.log(`[INFO] Running SWE-bench FAIL_TO_PASS tests (${task.failToPass.length} tests)...`);
+
+      // Apply the test patch
+      if (task.testPatch) {
+        console.log(`[INFO] Applying SWE-bench test patch...`);
+        try {
+          const patchPath = join(tmpDir, "swe_test.patch");
+          await writeFile(patchPath, task.testPatch);
+          await execAsync(`git apply swe_test.patch`, { cwd: tmpDir });
+          console.log(`[INFO] Test patch applied successfully.`);
+        } catch (e) {
+          console.warn(`[WARN] Failed to apply test patch:`, e);
+        }
+      }
+
+      // Run the test command appropriate for this repo
+      const sweTestCmd = buildSweTestCommand(task);
+      console.log(`[INFO] SWE test command: ${sweTestCmd}`);
       try {
-        const { stdout, stderr } = await execAsync(task.testCommand, { cwd: tmpDir, maxBuffer: 10 * 1024 * 1024 });
+        const { stdout, stderr } = await execAsync(sweTestCmd, {
+          cwd: tmpDir, maxBuffer: 10 * 1024 * 1024, timeout: 300_000
+        });
         testExitCode = 0;
         testOutput = `STDOUT:\n${stdout}\nSTDERR:\n${stderr}`;
       } catch (error: any) {
         testExitCode = error.code ?? 1;
-        testOutput = `STDOUT:\n${error.stdout}\nSTDERR:\n${error.stderr}\nERROR: ${error.message}`;
+        testOutput = `STDOUT:\n${error.stdout || ""}\nSTDERR:\n${error.stderr || ""}\nERROR: ${error.message}`;
       }
-      console.log(`[INFO] Test command finished with exit code ${testExitCode}`);
+      console.log(`[INFO] SWE-bench test exit code: ${testExitCode}`);
+    } else {
+      // Original flow for non-SWE tasks
+      if (task.testPatch) {
+        console.log(`[INFO] Applying test patch...`);
+        try {
+          const patchPath = join(tmpDir, "test.patch");
+          await writeFile(patchPath, task.testPatch);
+          await execAsync(`git apply test.patch`, { cwd: tmpDir });
+        } catch (e) {
+          console.warn(`[WARN] Failed to apply test patch:`, e);
+        }
+      }
+
+      if (task.testCommand) {
+        console.log(`[INFO] Running test command: ${task.testCommand}...`);
+        try {
+          const { stdout, stderr } = await execAsync(task.testCommand, { cwd: tmpDir, maxBuffer: 10 * 1024 * 1024 });
+          testExitCode = 0;
+          testOutput = `STDOUT:\n${stdout}\nSTDERR:\n${stderr}`;
+        } catch (error: any) {
+          testExitCode = error.code ?? 1;
+          testOutput = `STDOUT:\n${error.stdout}\nSTDERR:\n${error.stderr}\nERROR: ${error.message}`;
+        }
+        console.log(`[INFO] Test command finished with exit code ${testExitCode}`);
+      }
     }
 
     console.log(`[INFO] Running LLM judge...`);
@@ -302,7 +380,7 @@ ${task.prompt}`;
 
     const judgeSystemPrompt = `You are an expert software engineer judging the output of an AI coding agent.
 You will be provided with the task prompt, the expected behavior, the git diff generated by the agent, and optionally a known correct "solution diff" and automated test output.
-Your job is to determine if the diff successfully accomplishes the task. If tests were run, verify that the exit code is 0 (or indicates success).
+Your job is to determine if the diff successfully accomplishes the task. If automated tests were run, heavily weight those results — passing tests strongly indicate success, failing tests strongly indicate failure.
 Respond ONLY with a JSON object in this exact format, with no markdown wrapping:
 {
   "score": 1,
@@ -312,6 +390,13 @@ Respond ONLY with a JSON object in this exact format, with no markdown wrapping:
     let truncatedTestOutput = testOutput;
     if (truncatedTestOutput.length > 15000) {
       truncatedTestOutput = truncatedTestOutput.substring(0, 5000) + "\n\n...[TRUNCATED]...\n\n" + truncatedTestOutput.substring(truncatedTestOutput.length - 10000);
+    }
+
+    // Build the test results section for the judge
+    let testResultsSection = "";
+    if (testExitCode !== null) {
+      const testSource = isSweContainer ? "SWE-bench Container" : "Local";
+      testResultsSection = `Automated Test Execution (${testSource}):\nExit Code: ${testExitCode}\nTests: ${isSweContainer && task.failToPass ? task.failToPass.join(", ") : (task.testCommand || "N/A")}\nOutput:\n${truncatedTestOutput}\n`;
     }
 
     const judgePrompt = `Task Prompt:
@@ -324,7 +409,7 @@ ${expectedDiff ? `Known Correct Solution Diff:\n${expectedDiff}\n` : ""}
 Agent Diff:
 ${diff ? diff : "(No changes made)"}
 
-${task.testCommand ? `Automated Test Execution:\nCommand: ${task.testCommand}\nExit Code: ${testExitCode}\nOutput:\n${truncatedTestOutput}\n` : ""}
+${testResultsSection}
 `;
 
     let judgeOutput = "";
@@ -356,17 +441,22 @@ ${task.testCommand ? `Automated Test Execution:\nCommand: ${task.testCommand}\nE
       rationale = judgeOutput;
     }
 
-    // The judge has evaluated the test output and determined the final score.
-    // We trust the judge's assessment of whether test failures are related to the task.
-    const result = {
+    // For SWE-bench tasks, the container test result is ground truth.
+    // The judge provides the rationale but the score comes from tests when available.
+    const finalScore = (isSweContainer && testExitCode !== null) ? (testExitCode === 0 ? 1 : 0) : score;
+    const result: any = {
       task: task.id,
       durationMs: duration,
       diff,
       testExitCode,
       testOutput,
-      judgeScore: score,
-      judgeRationale: rationale
+      judgeScore: finalScore,
+      judgeRationale: rationale,
     };
+    if (isSweContainer) {
+      result.sweContainerTest = true;
+      result.sweTestExitCode = testExitCode;
+    }
 
     const resultPath = join(outputDir, `results-${task.id}.json`);
     await writeFile(resultPath, JSON.stringify(result, null, 2));
@@ -385,8 +475,12 @@ ${task.testCommand ? `Automated Test Execution:\nCommand: ${task.testCommand}\nE
     return result;
 
   } finally {
-    await rm(tmpDir, { recursive: true, force: true });
-    console.log(`[INFO] Cleaned up ${tmpDir}`);
+    if (!isSweContainer) {
+      await rm(tmpDir, { recursive: true, force: true });
+      console.log(`[INFO] Cleaned up ${tmpDir}`);
+    } else {
+      console.log(`[INFO] SWE-bench container — skipping /testbed cleanup.`);
+    }
   }
 }
 
@@ -399,22 +493,34 @@ async function main() {
       "model-tag": { type: "string" },
       timeout: { type: "string", default: "30" },
       platform: { type: "string" },
-      engine: { type: "string", default: "llama.cpp" },
+      provider: { type: "string" },
+      engine: { type: "string" }, // backward compat alias for --provider
       port: { type: "string" },
     },
     allowPositionals: true,
   });
 
+  // --provider takes precedence, --engine is a backward-compat alias
+  const provider = (values.provider || values.engine || "llama.cpp") as string;
+
   const targetPath = positionals[0];
   if (!targetPath) {
-    console.error("Usage: bun run src/index.ts <task-file-or-dir> [--model provider/model-id] [--judge-model provider/model-id] [--model-tag tag] [--platform platform-id] [--engine llama.cpp|ds4] [--port 8080]");
+    console.error("Usage: bun run src/index.ts <task-file-or-dir> [--provider llama.cpp|ds4|openrouter] [--model model-id] [--judge-model provider/model-id] [--model-tag tag] [--platform platform-id] [--port 8080]");
     process.exit(1);
   }
 
   let agentModelReq;
   if (values.model) {
-    const parts = values.model.split("/");
-    agentModelReq = parts.length > 1 ? { provider: parts[0] as any, id: parts.slice(1).join("/") } : undefined;
+    const modelVal = values.model;
+    // If --model contains a slash AND --provider is set, treat --model as just the model ID
+    // Otherwise, parse provider/model from --model (backward compat: --model openrouter/deepseek/deepseek-v4-flash)
+    if (modelVal.includes("/") && !values.provider) {
+      const parts = modelVal.split("/");
+      agentModelReq = { provider: parts[0] as any, id: parts.slice(1).join("/") };
+    } else {
+      // --model is just the model ID, use --provider for the provider
+      agentModelReq = { provider: provider as any, id: modelVal };
+    }
   }
 
   let judgeModelReq;
@@ -446,11 +552,11 @@ async function main() {
   const timeoutMin = parseInt(values.timeout as string, 10) || 30;
 
   const modelTag = values["model-tag"] as string | undefined;
-  const engine = values.engine as string;
+  const isLocalProvider = provider === "llama.cpp" || provider === "ds4";
   let outputDir = "results";
-  if (!agentModelReq || agentModelReq.provider === "llama.cpp" || agentModelReq.provider === "ds4") {
+  if (isLocalProvider) {
     try {
-      const fetchPort = values.port || (engine === "ds4" ? "8000" : "8080");
+      const fetchPort = values.port || (provider === "ds4" ? "8000" : "8080");
       const res = await fetch(`http://localhost:${fetchPort}/v1/models`);
       const data = await res.json();
       if (data && data.data && data.data.length > 0) {
@@ -508,7 +614,7 @@ async function main() {
       console.warn(`[WARN] Could not pre-parse task file ${f} for resume check.`);
     }
 
-    const res = await runTask(f, agentModelReq, judgeModelReq, outputDir, timeoutMin, engine, values.port as string);
+    const res = await runTask(f, agentModelReq, judgeModelReq, outputDir, timeoutMin, provider, values.port as string);
     results.push(res);
     if (res.judgeScore === 1) passed++;
     totalDuration += res.durationMs;
@@ -532,4 +638,4 @@ async function main() {
   console.log(`======================================================\n`);
 }
 
-main().catch(console.error);
+main().catch((e) => { console.error(e); process.exit(1); }).then(() => process.exit(0));

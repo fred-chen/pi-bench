@@ -4,13 +4,13 @@ A lightweight, customizable benchmark runner for `pi-coding-agent`, inspired by 
 
 ## Overview
 `pi-bench` automates the process of testing an AI coding agent against real-world tasks. It does this by:
-1. Cloning a target repository to a temporary workspace.
+1. Cloning a target repository to a temporary workspace (or using a pre-configured SWE-bench container).
 2. Checking out a specific baseline commit.
-3. Spinning up `pi-coding-agent` in the temporary workspace with a predefined task prompt.
+3. Spinning up `pi-coding-agent` in the workspace with a predefined task prompt.
 4. Letting the agent use its tools (`read`, `bash`, `edit`, `write`) to complete the task.
 5. Capturing the generated patch (`git diff`).
-6. **(New) Running the test suite**, if a `testCommand` is provided, verifying success or failure based on standard exit codes.
-7. Using a secondary LLM "Judge" to evaluate the patch against expected behavior and outputting a structured JSON score (if no hard test command determines the outcome).
+6. **Running the test suite** — either from a `testCommand` (curated tasks) or SWE-bench `FAIL_TO_PASS` tests (inside the container).
+7. Using a secondary LLM **Judge** (Gemini) to evaluate the patch and provide a rationale for the score.
 
 ## Setup
 
@@ -18,8 +18,6 @@ First, install the required dependencies (using `bun` or `npm`):
 ```bash
 bun install
 ```
-
-Make sure your API keys are configured exactly as they would be for the standard `pi` CLI (e.g. `ANTHROPIC_API_KEY`, or via `pi /login`).
 
 ## Defining Tasks
 
@@ -50,66 +48,164 @@ To download and import this dataset directly from HuggingFace, simply run:
 ```
 This will automatically generate the 50 task files inside the `tasks/verified-mini/` directory.
 
-### SWE-bench Lite
-`pi-bench` natively supports importing the standard SWE-bench Lite dataset (300 tasks):
+
+
+---
+
+## Running Benchmarks
+
+### SWE-bench Tasks (Recommended)
+
+SWE-bench tasks run inside **official SWE-bench Docker containers** from `ghcr.io/epoch-research/swe-bench.eval.x86_64.*`. Each task gets its own container with:
+- The correct Python version (e.g. Python 3.6 for Django 3.1, Python 3.8+ for Sphinx)
+- All dependencies pre-installed
+- The repository checked out at the right commit in `/testbed`
+
+This eliminates the environment mismatch problems that plague host-side execution.
+
+#### Pre-pull containers (optional)
+Download all 49 container images upfront (~2.4 GB download, ~6 GB on disk due to heavy layer sharing):
 ```bash
-bun run scripts/import-swe-bench.ts path/to/swe_bench_lite.json
+./scripts/pull-swe-containers.sh
 ```
-This generates individual task files in `tasks/synthetic/` mapped directly from SWE-bench instances, including the extraction of `test_patch` (which `pi-bench` will attempt to apply before running tests).
 
-## Usage
+#### Provider Setup & Execution
 
-You can run `pi-bench` against a **single file** or a **batch directory** of tasks.
+You can configure and use both local and cloud-based models as the backend engine for the `pi-coding-agent`.
+
+##### Local Providers (`llama.cpp` and `ds4`)
+Local providers are configured in [models.json](file:///home/kyuz0/Documents/Projects/pi-bench/models.json) in the project root. By default:
+- `llama.cpp` expects a local server running at `http://localhost:8080/v1`
+- `ds4` expects a local `ds4.c` server running at `http://localhost:8000/v1`
+
+When using a local provider, you do not need to specify a model name via `--model`. `pi-bench` will automatically query the local provider's `/v1/models` endpoint to retrieve the active model name and format the results directory accordingly. Whatever model your local server is currently running will be used.
+
+**Example: Running with `ds4`**
+```bash
+./run-swe-bench.sh tasks/verified-mini/ \
+  --provider ds4 \
+  --judge-model google/gemini-3.1-pro-preview \
+  --platform strix-halo \
+  --timeout 45
+```
+
+**Example: Running with `llama.cpp`**
+```bash
+./run-swe-bench.sh tasks/verified-mini/ \
+  --provider llama.cpp \
+  --judge-model google/gemini-3.1-pro-preview \
+  --platform strix-halo \
+  --timeout 45
+```
+
+##### Cloud Providers (`openrouter`)
+For cloud providers like OpenRouter, the provider endpoint is queried. Because these platforms host many models, you **must** specify which model to run using the `--model` flag.
+
+**Example: Running with OpenRouter**
+```bash
+./run-swe-bench.sh tasks/verified-mini/django__django-11790.json \
+  --provider openrouter \
+  --model deepseek/deepseek-v4-flash \
+  --judge-model google/gemini-3.1-pro-preview \
+  --platform openrouter \
+  --timeout 30
+```
+
+#### How SWE-bench evaluation works
+After the agent finishes editing code, the runner:
+1. **Applies the test patch** from the SWE-bench dataset (adds the regression tests)
+2. **Runs the `FAIL_TO_PASS` tests** inside the container using the correct Python and test runner
+3. **Score is ground truth** — if the tests pass, `score = 1`; if they fail, `score = 0`
+4. **The LLM Judge** (Gemini) receives both the diff and the test results, and provides a human-readable rationale explaining *why* the fix worked or didn't
+
+This combines the objectivity of SWE-bench's test-based evaluation with the explainability of an LLM judge.
+
+### Curated Tasks (Docker sandbox)
+
+For non-SWE-bench tasks (curated, custom), use the Docker runner:
+```bash
+./run-docker.sh tasks/curated/ \
+  --provider llama.cpp \
+  --judge-model google/gemini-3.1-pro-preview \
+  --platform strix-halo
+```
 
 ### Local Execution (Use with Caution)
 Running the benchmark locally executes the agent on your host machine.
-
 ```bash
-# Run a single task
-bun run src/index.ts tasks/synthetic/dummy-1.json
-
-# Run a full directory batch
-bun run src/index.ts tasks/curated/
+bun run src/index.ts tasks/curated/easy.json
 ```
 
-### Docker Execution (Recommended Sandbox)
-To ensure the coding agent can safely run `npm install`, arbitrary tests, or code without modifying your host system, we provide a Docker runner:
+---
+
+## CLI Reference
+
+### Provider & Model Flags
+
+| Flag | Description | Default |
+|---|---|---|
+| `--provider <name>` | Inference provider: `llama.cpp`, `ds4`, or `openrouter` | `llama.cpp` |
+| `--model <model-id>` | Model ID within the provider (e.g. `deepseek/deepseek-v4-flash`) | Auto-detected |
+| `--judge-model <provider/id>` | Judge model (e.g. `google/gemini-3.1-pro-preview`) | Same as agent |
+| `--port <port>` | Override the local server port | `8080` (llama.cpp), `8000` (ds4) |
+| `--engine <name>` | Backward-compatible alias for `--provider` | — |
+
+**Local providers** (`llama.cpp`, `ds4`) auto-detect the model name by querying the local server's `/v1/models` endpoint. No `--model` needed.
+
+**Cloud providers** (`openrouter`) require `--model` to specify which model to use, since the provider may host many models.
+
+**Backward compatibility**: `--model openrouter/deepseek/deepseek-v4-flash` (without `--provider`) still works — the provider is parsed from the first path segment.
+
+### Other Flags
+
+| Flag | Description | Default |
+|---|---|---|
+| `--platform <id>` | Save results to `benchmark_results/<platform>/` | — |
+| `--model-tag <tag>` | Append a suffix to the results directory (e.g. `mtp`) | — |
+| `--timeout <minutes>` | Agent timeout per task | `30` |
+
+### Examples
 
 ```bash
-# Builds the image and runs the benchmark inside a container
-./run-docker.sh tasks/curated/
-```
-*Note: To guarantee reproducibility and isolation, the Docker container runs completely decoupled from your host's `~/.pi` configuration. To provide API keys (like `GEMINI_API_KEY` for the judge), simply create a `.env` file in the root `pi-bench/` directory. `run-docker.sh` automatically maps this `.env` into the container.*
-
-### Configuring Models & Engines
-
-`pi-bench` uses two different types of models during a run: the **Agent Model** (which attempts to solve the coding task) and the **Judge Model** (which evaluates the agent's patch).
-
-#### Agent Models (Local Inference)
-`pi-bench` is designed to benchmark local inference engines. Because the Docker container runs with `--network host`, it automatically connects to your host machine's local servers.
-
-We support the following engines out of the box:
-- **`llama.cpp`** (Default): Connects to `localhost:8080`.
-- **`ds4`**: Connects to `localhost:8000`.
-
-You can switch the engine using the `--engine <name>` flag. If your local server runs on a non-standard port, use the `--port <port>` flag to override the default. If you need to configure custom API endpoints or model parameters (like max tokens or context windows), edit the `models.json` file inside the `pi-bench/` root directory.
-
-#### Judge Models (Remote APIs)
-To use a hosted LLM as the judge (like Gemini or Claude), you must provide your API keys. Create a `.env` file in the root `pi-bench/` directory and add your standard keys (e.g., `GEMINI_API_KEY=...`, `ANTHROPIC_API_KEY=...`). The `run-docker.sh` script automatically passes this environment file into the sandbox.
-
-#### Running with CLI Flags
-You can explicitly define both the agent and judge models via CLI flags. Additionally, you can provide a `--platform` flag to automatically save the results directly into the `benchmark_results/<platform>/` folder. If you want to append a suffix to the auto-detected model name (e.g., to distinguish MTP runs), use `--model-tag`:
-
-```bash
-./run-docker.sh tasks/verified-mini/ \
-  --engine ds4 \
-  --port 8000 \
+# Local llama.cpp (auto-detects model from server)
+./run-swe-bench.sh tasks/verified-mini/ \
   --judge-model google/gemini-3.1-pro-preview \
-  --platform strix-halo \
-  --model-tag mtp \
-  --timeout 45
+  --platform strix-halo
+
+# Local ds4 server on custom port
+./run-swe-bench.sh tasks/verified-mini/ \
+  --provider ds4 --port 9000 \
+  --judge-model google/gemini-3.1-pro-preview \
+  --platform strix-halo
+
+# OpenRouter cloud
+./run-swe-bench.sh tasks/verified-mini/ \
+  --provider openrouter --model deepseek/deepseek-v4-flash \
+  --judge-model google/gemini-3.1-pro-preview \
+  --platform openrouter-test
+
+# Single task, backward-compat style
+./run-swe-bench.sh tasks/verified-mini/django__django-11790.json \
+  --model openrouter/deepseek/deepseek-v4-flash \
+  --judge-model google/gemini-3.1-pro-preview \
+  --platform openrouter-test
 ```
-*This would produce a results directory like `Qwen3_6-35B-A3B-UD-Q8_K_XL_gguf-mtp_results/` instead of `Qwen3_6-35B-A3B-UD-Q8_K_XL_gguf_results/`.*
+
+---
+
+## Configuring Models
+
+If you need to configure custom API endpoints or model parameters (like max tokens or context windows), edit the `models.json` file in the project root.
+
+### API Keys
+Create a `.env` file in the root `pi-bench/` directory with your API keys:
+```
+GEMINI_API_KEY=...
+OPENROUTER_API_KEY=...
+```
+Both `run-docker.sh` and `run-swe-bench.sh` automatically pass this file into the container.
+
+---
 
 ## Results & Multi-Platform Dashboard
 
@@ -137,7 +233,7 @@ When running a **batch** (providing a directory like `tasks/verified-mini/`), `p
    ```
 2. **Run your benchmark with the `--platform` flag**:
    ```bash
-   ./run-docker.sh tasks/verified-mini/ \
+   ./run-swe-bench.sh tasks/verified-mini/ \
      --judge-model google/gemini-3.1-pro-preview \
      --platform r9700
    ```

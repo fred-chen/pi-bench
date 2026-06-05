@@ -34,7 +34,9 @@ async function main() {
       prompt: instance.problem_statement,
       expectedDiff: instance.patch,
       testPatch: instance.test_patch, // The test diff to apply
-      // If SWE-bench provides a known solution commit or pull request, we could add it, but 'patch' is the gold diff.
+      failToPass: JSON.parse(instance.FAIL_TO_PASS), // Tests that should fail before fix, pass after
+      passToPass: JSON.parse(instance.PASS_TO_PASS), // Tests that should continue passing
+      version: instance.version, // Project version (e.g. "3.1" for Django)
     };
 
     const outPath = join(outDir, `${task.id}.json`);

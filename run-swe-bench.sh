@@ -1,0 +1,115 @@
+#!/bin/bash
+set -e
+
+# Run pi-bench tasks inside official SWE-bench evaluation containers.
+# Each task runs in its own container with the correct Python version and dependencies.
+#
+# Usage:
+#   ./run-swe-bench.sh tasks/verified-mini/ --provider ds4 --judge-model google/gemini-3.1-pro-preview --platform strix-halo
+#   ./run-swe-bench.sh tasks/verified-mini/django__django-12209.json --provider openrouter --model deepseek/deepseek-v4-flash
+#
+# The script:
+#   1. Iterates over task files in the given directory (or runs a single task file)
+#   2. For each task, launches the corresponding SWE-bench container
+#   3. Installs bun + pi-bench deps inside the container (cached via Docker volume)
+#   4. Runs the benchmark: agent works in /testbed, then FAIL_TO_PASS tests are executed
+#   5. Results are written back to the host via the bind-mounted pi-bench directory
+
+TARGET="${1:?Usage: ./run-swe-bench.sh <task-file-or-dir> [extra-args...]}"
+shift
+EXTRA_ARGS="$@"
+REGISTRY="ghcr.io/epoch-research/swe-bench.eval.x86_64"
+PI_BENCH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Create persistent bun cache volume (shared across all container runs)
+docker volume create pi-bench-bun-cache 2>/dev/null || true
+
+# Collect env file args
+ENV_ARGS=""
+if [ -f "$PI_BENCH_DIR/.env" ]; then
+  ENV_ARGS="--env-file $PI_BENCH_DIR/.env"
+fi
+
+# Collect task files
+TASK_FILES=()
+if [ -d "$TARGET" ]; then
+  for f in "$TARGET"/*.json; do
+    [ -f "$f" ] && TASK_FILES+=("$f")
+  done
+else
+  TASK_FILES+=("$TARGET")
+fi
+
+if [ ${#TASK_FILES[@]} -eq 0 ]; then
+  echo "[ERROR] No task JSON files found in $TARGET"
+  exit 1
+fi
+
+TOTAL=${#TASK_FILES[@]}
+COUNT=0
+PASSED=0
+FAILED=0
+
+echo "========================================================"
+echo "[INFO] SWE-bench Runner — $TOTAL tasks queued"
+echo "========================================================"
+
+for task_file in "${TASK_FILES[@]}"; do
+  COUNT=$((COUNT + 1))
+  TASK_ID=$(python3 -c "import json; print(json.load(open('$task_file'))['id'])")
+  IMAGE="${REGISTRY}.${TASK_ID}:latest"
+
+  echo ""
+  echo "========================================================"
+  echo "[$COUNT/$TOTAL] Task: $TASK_ID"
+  echo "         Image: $IMAGE"
+  echo "========================================================"
+
+  # Make the task_file path relative to PI_BENCH_DIR for use inside the container
+  REL_TASK_FILE=$(python3 -c "import os; print(os.path.relpath('$(realpath "$task_file")', '$(realpath "$PI_BENCH_DIR")'))")
+
+  docker run --rm --network host $ENV_ARGS \
+    -v "$PI_BENCH_DIR:/pi-bench:z" \
+    -v "pi-bench-bun-cache:/root/.bun" \
+    "$IMAGE" \
+    bash -c "
+      set -e
+
+      # Install unzip + bun (cached after first run via volume)
+      if [ ! -f /root/.bun/bin/bun ]; then
+        echo '[SETUP] Installing bun...'
+        apt-get update -qq && apt-get install -y -qq unzip >/dev/null 2>&1
+        curl -fsSL https://bun.sh/install | bash >/dev/null 2>&1
+        echo '[SETUP] bun installed.'
+      fi
+      export PATH=/root/.bun/bin:\$PATH
+
+      # Ensure unzip is available (bun cache might exist from a previous run but unzip might not be in this container)
+      which unzip >/dev/null 2>&1 || { apt-get update -qq && apt-get install -y -qq unzip >/dev/null 2>&1; }
+
+      # Install pi-bench dependencies (fast if node_modules exists from bind mount)
+      cd /pi-bench && bun install --frozen-lockfile 2>/dev/null || bun install 2>/dev/null
+
+      # Activate the SWE-bench testbed conda environment so 'python' resolves
+      # to the correct version (e.g. Python 3.6 for Django, 3.8+ for Sphinx)
+      source /opt/miniconda3/etc/profile.d/conda.sh
+      conda activate testbed
+
+      # Run the benchmark
+      bun run src/index.ts $REL_TASK_FILE $EXTRA_ARGS
+    "
+
+  EXIT_CODE=$?
+  if [ $EXIT_CODE -eq 0 ]; then
+    PASSED=$((PASSED + 1))
+  else
+    FAILED=$((FAILED + 1))
+    echo "[WARN] Task $TASK_ID exited with code $EXIT_CODE"
+  fi
+done
+
+echo ""
+echo "========================================================"
+echo "[INFO] SWE-bench Runner Complete!"
+echo "[INFO] Tasks: $TOTAL | Succeeded: $PASSED | Failed: $FAILED"
+echo "========================================================"
