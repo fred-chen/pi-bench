@@ -1,0 +1,9 @@
+{
+  "task": "django__django-11964",
+  "durationMs": 1697553,
+  "diff": "diff --git a/django/db/models/query_utils.py b/django/db/models/query_utils.py\nindex 189fb4f..61ce7df 100644\n--- a/django/db/models/query_utils.py\n+++ b/django/db/models/query_utils.py\n@@ -6,6 +6,7 @@ large and/or so that they can be used by other modules without getting into\n circular import difficulties.\n \"\"\"\n import copy\n+import enum\n import functools\n import inspect\n from collections import namedtuple\n@@ -119,6 +120,14 @@ class DeferredAttribute:\n     def __init__(self, field):\n         self.field = field\n \n+    def __set__(self, instance, value):\n+        # Convert enum values to their .value property to store the raw\n+        # value rather than the enum member. This ensures consistency\n+        # between freshly created and retrieved objects.\n+        if isinstance(value, enum.Enum):\n+            value = value.value\n+        instance.__dict__[self.field.attname] = value\n+\n     def __get__(self, instance, cls=None):\n         \"\"\"\n         Retrieve and caches the value from the datastore on the first lookup.\n",
+  "testExitCode": null,
+  "testOutput": "",
+  "judgeScore": 0,
+  "judgeRationale": "The agent modifies `DeferredAttribute.__set__` to unwrap ALL Enums to their `.value` globally for any model field assignment. This can introduce severe side effects for custom fields or configurations that rely on the Enum object itself. The correct fix is to define `__str__` on the `Choices` base class to return the value's string representation, matching standard Django behavior."
+}
