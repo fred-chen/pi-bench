@@ -127,7 +127,8 @@ For non-SWE-bench tasks (curated, custom), use the Docker runner:
 ./run-docker.sh tasks/curated/ \
   --provider llama.cpp \
   --judge-model google/gemini-3.1-pro-preview \
-  --platform strix-halo
+  --platform strix-halo \
+  --timeout 30
 ```
 
 ### Local Execution (Use with Caution)
@@ -170,25 +171,29 @@ bun run src/index.ts tasks/curated/easy.json
 # Local llama.cpp (auto-detects model from server)
 ./run-swe-bench.sh tasks/verified-mini/ \
   --judge-model google/gemini-3.1-pro-preview \
-  --platform strix-halo
+  --platform strix-halo \
+  --timeout 45
 
 # Local ds4 server on custom port
 ./run-swe-bench.sh tasks/verified-mini/ \
   --provider ds4 --port 9000 \
   --judge-model google/gemini-3.1-pro-preview \
-  --platform strix-halo
+  --platform strix-halo \
+  --timeout 45
 
 # OpenRouter cloud
 ./run-swe-bench.sh tasks/verified-mini/ \
   --provider openrouter --model deepseek/deepseek-v4-flash \
   --judge-model google/gemini-3.1-pro-preview \
-  --platform openrouter-test
+  --platform openrouter \
+  --timeout 30
 
 # Single task, backward-compat style
 ./run-swe-bench.sh tasks/verified-mini/django__django-11790.json \
   --model openrouter/deepseek/deepseek-v4-flash \
   --judge-model google/gemini-3.1-pro-preview \
-  --platform openrouter-test
+  --platform openrouter \
+  --timeout 30
 ```
 
 ---

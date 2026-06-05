@@ -65,10 +65,9 @@ for task_file in "${TASK_FILES[@]}"; do
   echo "         Image: $IMAGE"
   echo "========================================================"
 
-  # Make the task_file path relative to PI_BENCH_DIR for use inside the container
   REL_TASK_FILE=$(python3 -c "import os; print(os.path.relpath('$(realpath "$task_file")', '$(realpath "$PI_BENCH_DIR")'))")
 
-  docker run --rm --network host $ENV_ARGS \
+  docker run --init -it --rm --network host $ENV_ARGS \
     -v "$PI_BENCH_DIR:/pi-bench:z" \
     -v "pi-bench-bun-cache:/root/.bun" \
     "$IMAGE" \

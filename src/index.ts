@@ -188,7 +188,7 @@ async function runTask(taskFile: string, agentModelReq: any, judgeModelReq: any,
     console.log(`\n--- Agent output ---`);
     const start = Date.now();
     const sweEnvInstruction = isSweContainer
-      ? `\n9. The development environment is already fully configured with the correct Python version and all dependencies pre-installed. Do NOT install packages, create virtual environments, or modify the Python installation. Just focus on understanding and fixing the bug.\n10. Do NOT modify any test files. All test changes have already been taken care of. Your task is to make minimal changes to non-test source files only.\n11. Make the MINIMAL changes necessary to fix the issue. Do not refactor unrelated code.`
+      ? `7. The development environment is already fully configured with the correct Python version and all dependencies pre-installed. Do NOT install packages, create virtual environments, or modify the Python installation. Just focus on understanding and fixing the bug.\n8. If necessary you can write tests or modify existing tests to verify your fix. Avoid running the entire test suite though, if you can only focus on tests that are relevant to the code you're changing to ensure you're not introducing regressions.\n9. Make the MINIMAL changes necessary to fix the issue. Do not refactor unrelated code.`
       : "";
     const agentPrompt = `You are an expert AI coding assistant. The target repository has ALREADY been cloned into your CURRENT WORKING DIRECTORY (\`${tmpDir}\`). 
 
@@ -198,9 +198,8 @@ CRITICAL INSTRUCTIONS:
 3. Do NOT explore, read, or modify files outside of your current working directory.
 4. Focus only on fixing the issue described below and verifying your fix with tests.
 5. You are running completely autonomously. There is NO human interaction. You must independently investigate, write the fix, verify it, and then STOP calling tools when you are done.
-6. If you find yourself repeatedly running the exact same commands or reading the same files without making progress, STOP looping. Formulate a new plan or implement a fix based on what you already know.
-7. You are to complete the task and produce changes editing the files in this project. Do not stop without editing the files required to complete the task!
-8. If the 'read' tool output truncates and says "Use offset=X to continue", use that offset in your next read call to paginate correctly. Do not just randomly change the limit.${sweEnvInstruction}
+6. You are to complete the task and produce changes editing the files in this project. Do not stop without editing the files required to complete the task!
+${sweEnvInstruction}
 
 Issue Description:
 ${task.prompt}`;
@@ -312,6 +311,13 @@ ${task.prompt}`;
         try {
           const patchPath = join(tmpDir, "swe_test.patch");
           await writeFile(patchPath, task.testPatch);
+
+          // Revert any changes the agent made to standard test directories
+          // to prevent patch conflicts with the SWE-bench evaluation testPatch.
+          console.log(`[INFO] Reverting agent test modifications to avoid conflicts...`);
+          await execAsync(`git reset HEAD tests/ test/ testing/ 2>/dev/null || true`, { cwd: tmpDir });
+          await execAsync(`git checkout -- tests/ test/ testing/ 2>/dev/null || true`, { cwd: tmpDir });
+
           await execAsync(`git apply swe_test.patch`, { cwd: tmpDir });
           console.log(`[INFO] Test patch applied successfully.`);
         } catch (e) {
