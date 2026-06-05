@@ -1,9 +1,0 @@
-{
-  "task": "django__django-11848",
-  "durationMs": 231734,
-  "diff": "diff --git a/django/utils/http.py b/django/utils/http.py\nindex 572cfb4..2b3dfa7 100644\n--- a/django/utils/http.py\n+++ b/django/utils/http.py\n@@ -176,10 +176,14 @@ def parse_http_date(date):\n     try:\n         year = int(m.group('year'))\n         if year < 100:\n-            if year < 70:\n-                year += 2000\n-            else:\n+            # Per RFC 7231, a two-digit year that appears to be more than 50\n+            # years in the future is interpreted as the most recent year in\n+            # the past with the same last two digits.\n+            current_year = datetime.datetime.now().year\n+            if year > (current_year % 100) + 50:\n                 year += 1900\n+            else:\n+                year += 2000\n         month = MONTHS.index(m.group('mon').lower()) + 1\n         day = int(m.group('day'))\n         hour = int(m.group('hour'))\n",
-  "testExitCode": null,
-  "testOutput": "",
-  "judgeScore": 0,
-  "judgeRationale": "The agent hardcodes the centuries to 1900 and 2000. This fails when the sliding window requires wrapping into the next century (e.g., if the current year is 2080, year 30 should be parsed as 2130, not 2030). The known correct solution correctly calculates the current century dynamically."
-}

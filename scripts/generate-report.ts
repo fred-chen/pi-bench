@@ -10,6 +10,7 @@ interface TaskResult {
   testOutput: string;
   judgeScore: number;
   judgeRationale: string;
+  transcriptUrl?: string;
 }
 
 interface Platform {
@@ -17,8 +18,6 @@ interface Platform {
   name: string;
   gpu: string;
   ram: string;
-  backend: string;
-  rocm: string;
 }
 
 interface ModelStats {
@@ -26,6 +25,8 @@ interface ModelStats {
   platformId: string;
   name: string;
   tag: string | null;
+  backend: string;
+  rocm: string;
   totalTasks: number;
   passedTasks: number;
   successRate: number;
@@ -70,8 +71,8 @@ async function main() {
     platformDirs = await getDirectories(benchmarkResultsDir);
   }
   
-  // Array of { platform, modelDir, modelName }
-  const scanTargets: Array<{ platform: Platform; dir: string; name: string; tag: string | null }> = [];
+  // Array of { platform, modelDir, modelName, tag, backend, rocm }
+  const scanTargets: Array<{ platform: Platform; dir: string; name: string; tag: string | null; backend: string; rocm: string }> = [];
 
   for (const dirName of platformDirs) {
     const fullPath = join(benchmarkResultsDir, dirName);
@@ -98,14 +99,18 @@ async function main() {
     const subDirs = await getDirectories(fullPath);
     for (const subDir of subDirs) {
       if (subDir.endsWith("_results")) {
-        // Read optional run-meta.json for model tag
+        // Read optional run-meta.json for model tag, backend, and rocm
         let modelTag: string | null = null;
+        let backend = "unknown";
+        let rocm = "N/A";
         const metaPath = join(fullPath, subDir, "run-meta.json");
         const metaContent = await safeReadFile(metaPath);
         if (metaContent) {
           try {
             const meta = JSON.parse(metaContent);
             modelTag = meta.modelTag || null;
+            if (meta.backend) backend = meta.backend;
+            if (meta.rocm) rocm = meta.rocm;
           } catch {}
         }
 
@@ -119,7 +124,9 @@ async function main() {
           platform: platformData,
           dir: join(fullPath, subDir),
           name: modelName,
-          tag: modelTag
+          tag: modelTag,
+          backend,
+          rocm
         });
       }
     }
@@ -151,6 +158,13 @@ async function main() {
         totalDurationMs += result.durationMs || 0;
 
         const taskId = result.task;
+        
+        const transcriptName = `transcript-${taskId}.json`;
+        if (existsSync(join(target.dir, transcriptName))) {
+          const relativeDir = target.dir.substring(target.dir.indexOf("benchmark_results"));
+          result.transcriptUrl = `https://github.com/kyuz0/pi-bench/blob/main/${relativeDir}/${transcriptName}`.replace(/\\/g, "/");
+        }
+
         if (!tasksMap[taskId]) {
           tasksMap[taskId] = { id: taskId, results: {} };
         }
@@ -166,6 +180,8 @@ async function main() {
         platformId: target.platform.id,
         name: target.name,
         tag: target.tag,
+        backend: target.backend,
+        rocm: target.rocm,
         totalTasks,
         passedTasks,
         successRate: passedTasks / totalTasks,

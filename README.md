@@ -163,6 +163,7 @@ bun run src/index.ts tasks/curated/easy.json
 |---|---|---|
 | `--platform <id>` | Save results to `benchmark_results/<platform>/` | — |
 | `--model-tag <tag>` | Append a suffix to the results directory (e.g. `mtp`) | — |
+| `--rocm-version <ver>`| ROCm version running the backend | `7.2.4` |
 | `--timeout <minutes>` | Agent timeout per task | `30` |
 
 ### Examples
@@ -172,6 +173,7 @@ bun run src/index.ts tasks/curated/easy.json
 ./run-swe-bench.sh tasks/verified-mini/ \
   --judge-model google/gemini-3.1-pro-preview \
   --platform strix-halo \
+  --rocm-version 7.2.4 \
   --timeout 45
 
 # Local ds4 server on custom port
@@ -231,9 +233,7 @@ When running a **batch** (providing a directory like `tasks/verified-mini/`), `p
      "id": "r9700",
      "name": "Radeon 9700",
      "gpu": "Radeon 9700 16GB",
-     "ram": "32GB DDR5",
-     "backend": "llama.cpp",
-     "rocm": "7.2.2"
+     "ram": "32GB DDR5"
    }
    ```
 2. **Run your benchmark with the `--platform` flag**:

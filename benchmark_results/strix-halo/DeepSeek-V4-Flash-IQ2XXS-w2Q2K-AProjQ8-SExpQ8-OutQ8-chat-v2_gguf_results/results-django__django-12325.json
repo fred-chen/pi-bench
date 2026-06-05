@@ -1,0 +1,9 @@
+{
+  "task": "django__django-12325",
+  "durationMs": 1705161,
+  "diff": "diff --git a/django/db/models/base.py b/django/db/models/base.py\nindex 8ea6c05..60f6b45 100644\n--- a/django/db/models/base.py\n+++ b/django/db/models/base.py\n@@ -204,7 +204,13 @@ class ModelBase(type):\n             for field in base._meta.local_fields:\n                 if isinstance(field, OneToOneField):\n                     related = resolve_relation(new_class, field.remote_field.model)\n-                    parent_links[make_model_tuple(related)] = field\n+                    # If the key already exists, don't overwrite unless\n+                    # the new field has parent_link=True (the existing\n+                    # field doesn't have it).\n+                    link_key = make_model_tuple(related)\n+                    existing = parent_links.get(link_key)\n+                    if existing is None or field.remote_field.parent_link or not existing.remote_field.parent_link:\n+                        parent_links[link_key] = field\n \n         # Track fields inherited from base models.\n         inherited_attributes = set()\n",
+  "testExitCode": null,
+  "testOutput": "",
+  "judgeScore": 0,
+  "judgeRationale": "The agent attempted to fix the issue by modifying `base.py` to check for `parent_link`, but it completely missed the `ImproperlyConfigured` exception in `options.py` which is the actual error reported in the issue. Because `options.py` and the main MTI logic are unmodified, the crash will still occur."
+}

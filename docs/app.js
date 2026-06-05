@@ -66,9 +66,23 @@ const App = {
             let name = idOrName.includes('::') ? idOrName.split('::')[1] : idOrName;
             let clean = name.replace(/_gguf$/i, '');
             clean = clean.replace(/-\d{5}-of-\d{5}$/i, '');
-            const match = clean.match(/(.*?)-(UD-Q[A-Z0-9_]+|Q[A-Z0-9_]+)$/i);
             
-            let base = match ? match[1] : clean;
+            let base = clean;
+            let quant = null;
+
+            // First check for verbose IQ quants (e.g., IQ2XXS-w2Q2K-AProjQ8...)
+            const iqMatch = clean.match(/(.*?)-(IQ.*)$/i);
+            if (iqMatch) {
+                base = iqMatch[1];
+                quant = iqMatch[2];
+            } else {
+                // Check standard Q or UD-Q quants
+                const match = clean.match(/(.*?)-(UD-Q[A-Z0-9_]+|Q[A-Z0-9_]+)$/i);
+                if (match) {
+                    base = match[1];
+                    quant = match[2];
+                }
+            }
             
             // Normalize: replace underscores with dots (e.g. Qwen3_6 -> Qwen3.6)
             base = base.replace(/_/g, '.');
@@ -79,7 +93,7 @@ const App = {
 
             return {
                 base: base,
-                quant: match ? match[2] : null
+                quant: quant
             };
         };
 
