@@ -1,9 +1,0 @@
-{
-  "task": "sphinx-doc__sphinx-7757",
-  "durationMs": 487307,
-  "diff": "diff --git a/sphinx/util/inspect.py b/sphinx/util/inspect.py\nindex 15f0d66..de5732a 100644\n--- a/sphinx/util/inspect.py\n+++ b/sphinx/util/inspect.py\n@@ -521,10 +521,16 @@ def signature_from_str(signature: str) -> inspect.Signature:\n     params = []\n \n     if hasattr(args, \"posonlyargs\"):\n-        for arg in args.posonlyargs:  # type: ignore\n+        posonly_defaults = list(args.defaults)\n+        # pad defaults to match total positional args\n+        total_pos = len(args.posonlyargs) + len(args.args)\n+        for _ in range(len(posonly_defaults), total_pos):\n+            posonly_defaults.insert(0, None)\n+        for i, arg in enumerate(args.posonlyargs):  # type: ignore\n             annotation = ast_unparse(arg.annotation) or Parameter.empty\n+            default = ast_unparse(posonly_defaults[i]) or Parameter.empty\n             params.append(Parameter(arg.arg, Parameter.POSITIONAL_ONLY,\n-                                    annotation=annotation))\n+                                    default=default, annotation=annotation))\n \n     for i, arg in enumerate(args.args):\n         if len(args.args) - i <= len(args.defaults):\n",
-  "testExitCode": null,
-  "testOutput": "",
-  "judgeScore": 1,
-  "judgeRationale": "The agent correctly pads the defaults list to match the total number of positional arguments (both positional-only and regular positional), allowing it to correctly map the defaults to `posonlyargs`. The logic successfully resolves the issue."
-}
