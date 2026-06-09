@@ -293,6 +293,71 @@ ${task.prompt}`;
       diff = await getDiff();
     }
 
+    // Check if diff only contains config/environment files (no actual source code edits).
+    // This catches a common failure pattern where the agent modifies setup.py/tox.ini
+    // (environment artifacts) but never edits real source code.
+    const CONFIG_ONLY_FILES = new Set([
+      "setup.py", "setup.cfg", "tox.ini", "pyproject.toml",
+      "requirements.txt", ".pre-commit-config.yaml", "Makefile",
+      "MANIFEST.in", "pytest.ini", ".flake8", ".pylintrc",
+    ]);
+
+    const diffHasOnlyConfigFiles = (diffText: string): boolean => {
+      if (!diffText.trim()) return false; // empty diff is handled separately
+      const files: string[] = [];
+      for (const line of diffText.split("\n")) {
+        if (line.startsWith("diff --git")) {
+          const parts = line.split(" ");
+          if (parts.length >= 4) {
+            const filePath = parts[3].replace(/^b\//, "");
+            files.push(filePath.split("/").pop() || filePath);
+          }
+        }
+      }
+      if (files.length === 0) return false;
+      return files.every((f) => CONFIG_ONLY_FILES.has(f));
+    };
+
+    if (
+      diffHasOnlyConfigFiles(diff) &&
+      !timedOut &&
+      (!lastAssistant || lastAssistant.stopReason !== "error")
+    ) {
+      console.log(
+        `\n[INFO] Agent only modified config/build files (no source code edits). Prompting to make actual changes...`
+      );
+      const configOnlyPrompt = `IMPORTANT: You have only modified build/configuration files (such as setup.py, tox.ini, pyproject.toml) but have NOT made any actual source code changes. These config file changes are likely environment artifacts and do NOT address the issue.\n\nYou MUST edit the actual source code files to fix the bug described in the task. Go back to investigating the issue and implement the fix in the relevant Python source files.\n\nReminder of your task:\n${task.prompt}`;
+
+      try {
+        await runPromptWithLoopDetection(configOnlyPrompt);
+      } catch (err: any) {
+        if (err.message === "AGENT_TIMEOUT") {
+          // handled
+        } else {
+          throw err;
+        }
+      }
+
+      lastAssistant = [...session.messages]
+        .reverse()
+        .find((m) => m.role === "assistant") as any;
+      if (lastAssistant && lastAssistant.stopReason === "error") {
+        const errorMsg = lastAssistant.errorMessage || "Unknown error";
+        const isConnectionError =
+          /connection|fetch failed|socket|refused|lost|connect|timeout|timed out|500|502|503|504/i.test(
+            errorMsg
+          );
+        if (isConnectionError) {
+          throw new Error(
+            `Inference backend is unreachable or crashed: ${errorMsg}`
+          );
+        }
+      }
+
+      console.log(`[INFO] Re-extracting diff after config-only re-prompt...`);
+      diff = await getDiff();
+    }
+
     const duration = Date.now() - start;
     console.log(`\n--- Agent finished in ${duration}ms ---\n`);
 
