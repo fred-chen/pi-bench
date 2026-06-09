@@ -49,15 +49,32 @@ TOTAL=${#TASK_FILES[@]}
 COUNT=0
 PASSED=0
 FAILED=0
-RESULTS_DIR=""
+
+# Determine results directory on the host to check for cached results
+RESULTS_DIR=$(bun run src/index.ts --print-output-dir "$TARGET" $EXTRA_ARGS 2>/dev/null || true)
 
 echo "========================================================"
 echo "[INFO] SWE-bench Runner — $TOTAL tasks queued"
+if [ -n "$RESULTS_DIR" ]; then
+  echo "[INFO] Results directory: $RESULTS_DIR"
+fi
 echo "========================================================"
 
 for task_file in "${TASK_FILES[@]}"; do
   COUNT=$((COUNT + 1))
   TASK_ID=$(python3 -c "import json; print(json.load(open('$task_file'))['id'])")
+
+  # Skip if result already exists (check on host to avoid docker startup overhead)
+  if [ -n "$RESULTS_DIR" ] && [ -f "$RESULTS_DIR/results-${TASK_ID}.json" ]; then
+    echo ""
+    echo "========================================================"
+    echo "[$COUNT/$TOTAL] Task: $TASK_ID"
+    echo "[INFO] Skipping $TASK_ID, result already exists."
+    echo "========================================================"
+    PASSED=$((PASSED + 1))
+    continue
+  fi
+
   IMAGE="${REGISTRY}.${TASK_ID}:latest"
 
   echo ""

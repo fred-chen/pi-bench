@@ -522,6 +522,7 @@ async function main() {
       "rocm-version": { type: "string", default: "7.2.4" },
       port: { type: "string" },
       "inference-profile": { type: "string" },
+      "print-output-dir": { type: "boolean" },
     },
     allowPositionals: true,
   });
@@ -530,7 +531,7 @@ async function main() {
   const provider = (values.provider || values.engine || "llama.cpp") as string;
 
   const targetPath = positionals[0];
-  if (!targetPath) {
+  if (!targetPath && !values["print-output-dir"]) {
     console.error("Usage: bun run src/index.ts <task-file-or-dir> [--provider llama.cpp|ds4|openrouter] [--model model-id] [--judge-model provider/model-id] [--model-tag tag] [--platform platform-id] [--rocm-version 7.2.4] [--port 8080] [--inference-profile params]");
     process.exit(1);
   }
@@ -553,29 +554,8 @@ async function main() {
   if (values["judge-model"]) {
     const parts = values["judge-model"].split("/");
     judgeModelReq = parts.length > 1 ? getModel(parts[0] as any, parts[1]) : undefined;
-    if (!judgeModelReq) console.warn(`[WARN] Could not resolve judge model ${values["judge-model"]}. Using default.`);
+    if (!judgeModelReq && !values["print-output-dir"]) console.warn(`[WARN] Could not resolve judge model ${values["judge-model"]}. Using default.`);
   }
-
-  const s = await stat(targetPath);
-  const taskFiles: string[] = [];
-  if (s.isDirectory()) {
-    const files = await readdir(targetPath);
-    for (const f of files) {
-      if (f.endsWith(".json")) {
-        taskFiles.push(join(targetPath, f));
-      }
-    }
-  } else {
-    taskFiles.push(targetPath);
-  }
-
-  if (taskFiles.length === 0) {
-    console.log(`[INFO] No task JSON files found in ${targetPath}`);
-    return;
-  }
-
-  console.log(`[INFO] Found ${taskFiles.length} tasks to run.`);
-  const timeoutMin = parseInt(values.timeout as string, 10) || 30;
 
   const modelTag = values["model-tag"] as string | undefined;
   const isLocalProvider = provider === "llama.cpp" || provider === "ds4";
@@ -608,6 +588,32 @@ async function main() {
   if (values.platform) {
     outputDir = join("benchmark_results", values.platform as string, outputDir);
   }
+
+  if (values["print-output-dir"]) {
+    console.log(outputDir);
+    process.exit(0);
+  }
+
+  const s = await stat(targetPath);
+  const taskFiles: string[] = [];
+  if (s.isDirectory()) {
+    const files = await readdir(targetPath);
+    for (const f of files) {
+      if (f.endsWith(".json")) {
+        taskFiles.push(join(targetPath, f));
+      }
+    }
+  } else {
+    taskFiles.push(targetPath);
+  }
+
+  if (taskFiles.length === 0) {
+    console.log(`[INFO] No task JSON files found in ${targetPath}`);
+    return;
+  }
+
+  console.log(`[INFO] Found ${taskFiles.length} tasks to run.`);
+  const timeoutMin = parseInt(values.timeout as string, 10) || 30;
 
   await mkdir(outputDir, { recursive: true });
   const runMeta: any = {
