@@ -81,17 +81,24 @@ const App = {
                 base = tempBase;
                 quant = tempQuant.replace(/_/g, '.');
             } else {
-                // First check for verbose IQ quants (e.g., IQ2XXS-w2Q2K-AProjQ8...)
-                const iqMatch = clean.match(/(.*?)-(IQ.*)$/i);
-                if (iqMatch) {
-                    base = iqMatch[1];
-                    quant = iqMatch[2];
+                // Check for hybrid layer quants (e.g., Layers37-42Q4KExperts-...)
+                const layerMatch = clean.match(/(.*?)-(Layers\d.*)$/i);
+                if (layerMatch) {
+                    base = layerMatch[1];
+                    quant = layerMatch[2];
                 } else {
-                    // Check standard Q or UD-Q quants
-                    const match = clean.match(/(.*?)-(UD-Q[A-Z0-9_]+|Q[A-Z0-9_]+)$/i);
-                    if (match) {
-                        base = match[1];
-                        quant = match[2];
+                    // First check for verbose IQ quants (e.g., IQ2XXS-w2Q2K-AProjQ8...)
+                    const iqMatch = clean.match(/(.*?)-(IQ.*)$/i);
+                    if (iqMatch) {
+                        base = iqMatch[1];
+                        quant = iqMatch[2];
+                    } else {
+                        // Check standard Q or UD-Q quants
+                        const match = clean.match(/(.*?)-(UD-Q[A-Z0-9_]+|Q[A-Z0-9_]+)$/i);
+                        if (match) {
+                            base = match[1];
+                            quant = match[2];
+                        }
                     }
                 }
             }
