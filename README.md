@@ -73,10 +73,10 @@ Download all 49 container images upfront (~2.4 GB download, ~6 GB on disk due to
 
 You can configure and use both local and cloud-based models as the backend engine for the `pi-coding-agent`.
 
-##### Local Providers (`llama.cpp` and `ds4`)
+##### Local Providers (`llama.cpp`, `ds4`, and `vllm`)
 Local providers are configured in [models.json](file:///home/kyuz0/Documents/Projects/pi-bench/models.json) in the project root. By default:
 - `llama.cpp` expects a local server running at `http://localhost:8080/v1`
-- `ds4` expects a local `ds4.c` server running at `http://localhost:8000/v1`
+- `ds4` and `vllm` expect a local server running at `http://localhost:8000/v1`
 
 When using a local provider, you do not need to specify a model name via `--model`. `pi-bench` will automatically query the local provider's `/v1/models` endpoint to retrieve the active model name and format the results directory accordingly. Whatever model your local server is currently running will be used.
 
@@ -98,6 +98,18 @@ When using a local provider, you do not need to specify a model name via `--mode
   --provider ds4 \
   --judge-model google/gemini-3.1-pro-preview \
   --platform strix-halo \
+  --rocm-version 7.2.4 \
+  --timeout 45
+```
+
+**Example: Running with `vllm` and specifying a model**
+If your vLLM instance hosts multiple models or you want to explicitly select a configuration from `models.json`, use the `--model` flag:
+```bash
+./run-swe-bench.sh tasks/verified-mini/ \
+  --provider vllm \
+  --model RedHatAI/Qwen3.6-27B-FP8 \
+  --judge-model google/gemini-3.1-pro-preview \
+  --platform dual-r9700 \
   --rocm-version 7.2.4 \
   --timeout 45
 ```
@@ -149,13 +161,13 @@ bun run src/index.ts tasks/curated/easy.json
 
 | Flag | Description | Default |
 |---|---|---|
-| `--provider <name>` | Inference provider: `llama.cpp`, `ds4`, or `openrouter` | `llama.cpp` |
+| `--provider <name>` | Inference provider: `llama.cpp`, `ds4`, `vllm`, or `openrouter` | `llama.cpp` |
 | `--model <model-id>` | Model ID within the provider (e.g. `deepseek/deepseek-v4-flash`) | Auto-detected |
 | `--judge-model <provider/id>` | Judge model (e.g. `google/gemini-3.1-pro-preview`) | Same as agent |
-| `--port <port>` | Override the local server port | `8080` (llama.cpp), `8000` (ds4) |
+| `--port <port>` | Override the local server port | `8080` (llama.cpp), `8000` (ds4, vllm) |
 | `--engine <name>` | Backward-compatible alias for `--provider` | — |
 
-**Local providers** (`llama.cpp`, `ds4`) auto-detect the model name by querying the local server's `/v1/models` endpoint. No `--model` needed.
+**Local providers** (`llama.cpp`, `ds4`, `vllm`) auto-detect the model name by querying the local server's `/v1/models` endpoint. No `--model` needed unless you want to force a specific configuration from `models.json` or target a specific model on a multi-model server.
 
 **Cloud providers** (`openrouter`) require `--model` to specify which model to use, since the provider may host many models.
 
@@ -183,6 +195,14 @@ bun run src/index.ts tasks/curated/easy.json
 # Local ds4 server on custom port
 ./run-swe-bench.sh tasks/verified-mini/ \
   --provider ds4 --port 9000 \
+  --judge-model google/gemini-3.1-pro-preview \
+  --platform strix-halo \
+  --rocm-version 7.2.4 \
+  --timeout 45
+
+# Local vllm specifying an exact model ID
+./run-swe-bench.sh tasks/verified-mini/ \
+  --provider vllm --model cyankiwi/MiniMax-M2.7-AWQ-4bit \
   --judge-model google/gemini-3.1-pro-preview \
   --platform strix-halo \
   --rocm-version 7.2.4 \
