@@ -45,7 +45,7 @@ function buildSweTestCommand(task: any): string {
   return `cd /testbed && ${python} -m pytest --tb=short`;
 }
 
-async function runTask(taskFile: string, agentModelReq: any, judgeModelReq: any, outputDir: string = ".", timeoutMin: number = 30, provider: string = "llama.cpp", port?: string) {
+async function runTask(taskFile: string, agentModelReq: any, judgeModelReq: any, outputDir: string = ".", timeoutMin: number = 30, provider: string = "llama.cpp", port?: string, contextWindowOverride?: number) {
   const taskContent = await readFile(taskFile, "utf-8");
   const task = JSON.parse(taskContent);
 
@@ -101,7 +101,7 @@ async function runTask(taskFile: string, agentModelReq: any, judgeModelReq: any,
               baseUrl: `http://localhost:${port}/v1`,
               api: "openai-completions",
               apiKey: "none",
-              models: [{ id: "local-model", contextWindow: 128000, maxTokens: 65536 }]
+              models: [{ id: "local-model", contextWindow: contextWindowOverride || 128000, maxTokens: 65536 }]
             }
           }
         };
@@ -125,6 +125,12 @@ async function runTask(taskFile: string, agentModelReq: any, judgeModelReq: any,
         resolvedAgentModel = providerModels[0];
         console.log(`[INFO] No agent model specified, defaulting to ${resolvedAgentModel.provider}/${resolvedAgentModel.id}`);
       }
+    }
+
+    // Apply --context override to the resolved model (wins over models.json)
+    if (contextWindowOverride && resolvedAgentModel) {
+      resolvedAgentModel = { ...resolvedAgentModel, contextWindow: contextWindowOverride };
+      console.log(`[INFO] Context window overridden to ${contextWindowOverride} tokens`);
     }
 
     const { session } = await createAgentSession({
@@ -581,6 +587,7 @@ async function main() {
       "judge-model": { type: "string" },
       "model-tag": { type: "string" },
       timeout: { type: "string", default: "30" },
+      context: { type: "string" },
       platform: { type: "string" },
       provider: { type: "string" },
       engine: { type: "string" }, // backward compat alias for --provider
@@ -597,7 +604,7 @@ async function main() {
 
   const targetPath = positionals[0];
   if (!targetPath && !values["print-output-dir"]) {
-    console.error("Usage: bun run src/index.ts <task-file-or-dir> [--provider llama.cpp|ds4|openrouter] [--model model-id] [--judge-model provider/model-id] [--model-tag tag] [--platform platform-id] [--rocm-version 7.2.4] [--port 8080] [--inference-profile params]");
+    console.error("Usage: bun run src/index.ts <task-file-or-dir> [--provider llama.cpp|ds4|openrouter] [--model model-id] [--judge-model provider/model-id] [--model-tag tag] [--platform platform-id] [--rocm-version 7.2.4] [--port 8080] [--context tokens] [--inference-profile params]");
     process.exit(1);
   }
 
@@ -682,6 +689,10 @@ async function main() {
 
   console.log(`[INFO] Found ${taskFiles.length} tasks to run.`);
   const timeoutMin = parseInt(values.timeout as string, 10) || 30;
+  const contextWindowOverride = values.context ? parseInt(values.context as string, 10) : undefined;
+  if (contextWindowOverride) {
+    console.log(`[INFO] Context window override: ${contextWindowOverride} tokens`);
+  }
 
   await mkdir(outputDir, { recursive: true });
   const runMeta: any = {
@@ -692,6 +703,9 @@ async function main() {
   };
   if (values["inference-profile"]) {
     runMeta.inferenceProfile = values["inference-profile"];
+  }
+  if (contextWindowOverride) {
+    runMeta.contextWindowOverride = contextWindowOverride;
   }
   await writeFile(join(outputDir, "run-meta.json"), JSON.stringify(runMeta, null, 2));
   console.log(`[INFO] Saving results to directory: ${outputDir}`);
@@ -721,7 +735,7 @@ async function main() {
       console.warn(`[WARN] Could not pre-parse task file ${f} for resume check.`);
     }
 
-    const res = await runTask(f, agentModelReq, judgeModelReq, outputDir, timeoutMin, provider, values.port as string);
+    const res = await runTask(f, agentModelReq, judgeModelReq, outputDir, timeoutMin, provider, values.port as string, contextWindowOverride);
     results.push(res);
     if (res.judgeScore === 1) passed++;
     totalDuration += res.durationMs;

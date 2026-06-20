@@ -180,6 +180,7 @@ bun run src/index.ts tasks/curated/easy.json
 | `--platform <id>` | Save results to `benchmark_results/<platform>/` | — |
 | `--model-tag <tag>` | Append a suffix to the results directory (e.g. `mtp`) | — |
 | `--rocm-version <ver>`| ROCm version running the backend | `7.2.4` |
+| `--context <tokens>` | Override model context window size for this run | From `models.json` |
 | `--timeout <minutes>` | Agent timeout per task | `30` |
 
 ### Examples
@@ -221,6 +222,14 @@ bun run src/index.ts tasks/curated/easy.json
   --judge-model google/gemini-3.1-pro-preview \
   --platform openrouter \
   --timeout 30
+
+# Override context window for a run (e.g. limit to 90k tokens)
+./run-swe-bench.sh tasks/verified-mini/ \
+  --provider vllm --model cyankiwi/MiniMax-M2.7-AWQ-4bit \
+  --judge-model google/gemini-3.1-pro-preview \
+  --platform strix-halo \
+  --context 90000 \
+  --timeout 45
 ```
 
 ---
